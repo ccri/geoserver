@@ -29,6 +29,7 @@ Extensions are available at the `GeoServer download page <http://geoserver.org/d
    oracle
    sqlserver
    teradata
+   geomesa
    
 GeoServer provides extensive facilities for controlling how databases are accessed.
 These are covered in the following sections.
