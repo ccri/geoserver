@@ -28,41 +28,25 @@
       <artifactId>gs-web-wms</artifactId>
       <version>${project.version}</version>
     </dependency>
+<!--
     <dependency>
       <groupId>org.geoserver.web</groupId>
       <artifactId>gs-web-gwc</artifactId>
       <version>${project.version}</version>
     </dependency>
+-->
         <dependency>
       <groupId>org.geoserver.web</groupId>
       <artifactId>gs-web-wfs</artifactId>
       <version>${project.version}</version>
     </dependency>
+
     <dependency>
-      <groupId>org.geoserver.web</groupId>
-      <artifactId>gs-web-wcs</artifactId>
-      <version>${project.version}</version>
-    </dependency>
-    <dependency>
-      <groupId>org.geoserver.web</groupId>
-      <artifactId>gs-web-demo</artifactId>
-      <version>${project.version}</version>
-    </dependency>
-    <dependency>
-      <groupId>org.geoserver.web</groupId>
-      <artifactId>gs-web-sec-jdbc</artifactId>
-      <version>${project.version}</version>
-    </dependency>
-    <dependency>
-      <groupId>org.geoserver.web</groupId>
-      <artifactId>gs-web-sec-ldap</artifactId>
-      <version>${project.version}</version>
-    </dependency>
-	<dependency>
       <groupId>org.geoserver.web</groupId>
       <artifactId>gs-web-rest</artifactId>
       <version>${project.version}</version>
     </dependency>
+
     <dependency>
       <groupId>org.geoserver</groupId>
       <artifactId>gs-platform</artifactId>
@@ -75,26 +59,6 @@
     </dependency>
     <dependency>
       <groupId>org.geoserver</groupId>
-      <artifactId>gs-wcs</artifactId>
-      <version>${project.version}</version>
-    </dependency>
-  <dependency>
-      <groupId>org.geoserver</groupId>
-      <artifactId>gs-wcs1_0</artifactId>
-      <version>${project.version}</version>
-    </dependency>
-    <dependency>
-      <groupId>org.geoserver</groupId>
-      <artifactId>gs-wcs1_1</artifactId>
-      <version>${project.version}</version>
-    </dependency>
-    <dependency>
-      <groupId>org.geoserver</groupId>
-      <artifactId>gs-wcs2_0</artifactId>
-      <version>${project.version}</version>
-    </dependency>
-    <dependency>
-      <groupId>org.geoserver</groupId>
       <artifactId>gs-wfs</artifactId>
       <version>${project.version}</version>
     </dependency>
@@ -103,16 +67,7 @@
       <artifactId>gs-wms</artifactId>
       <version>${project.version}</version>
     </dependency>
-    <dependency>
-      <groupId>org.geoserver</groupId>
-      <artifactId>gs-kml</artifactId>
-      <version>${project.version}</version>
-    </dependency>
-    <dependency>
-      <groupId>org.geoserver</groupId>
-      <artifactId>gs-gwc</artifactId>
-      <version>${project.version}</version>
-    </dependency>
+
     <dependency>
       <groupId>org.geoserver</groupId>
       <artifactId>gs-rest</artifactId>
@@ -124,34 +79,12 @@
       <version>${project.version}</version>
     </dependency>
     <dependency>
-      <groupId>org.geoserver.security</groupId>
-      <artifactId>gs-sec-jdbc</artifactId>
-      <version>${project.version}</version>
-    </dependency>
-    <dependency>
-      <groupId>org.geoserver.security</groupId>
-      <artifactId>gs-sec-ldap</artifactId>
-      <version>${project.version}</version>
-    </dependency>
-    <dependency>
       <groupId>org.geotools.jdbc</groupId>
       <artifactId>gt-jdbc-postgis</artifactId>
     </dependency>
     <dependency>
       <groupId>org.geotools</groupId>
-      <artifactId>gt-wfs-ng</artifactId>
-    </dependency>
-    <dependency>
-      <groupId>org.geotools</groupId>
       <artifactId>gt-geotiff</artifactId>
-    </dependency>
-    <dependency>
-      <groupId>org.geotools</groupId>
-      <artifactId>gt-arcgrid</artifactId>
-    </dependency>
-    <dependency>
-      <groupId>org.geotools</groupId>
-      <artifactId>gt-imagemosaic</artifactId>
     </dependency>
     <dependency>
       <groupId>org.geotools</groupId>
