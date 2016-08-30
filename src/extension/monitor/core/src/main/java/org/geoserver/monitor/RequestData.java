@@ -190,6 +190,11 @@ public class RequestData implements Serializable {
     private long responseLength;
 
     /**
+     * First 256 characters of response body
+     */
+    private byte[] responseBody;
+
+    /**
      * The response content MIME type, might be {@code null}
      */
     private String responseContentType;
@@ -464,6 +469,24 @@ public class RequestData implements Serializable {
 
     public void setResponseLength(long responseLength) {
         this.responseLength = responseLength;
+    }
+
+    /**
+     * The response body of the HTTP request
+     *
+     * May be trimmed to a maximum length.  If so, check getBodyContentLength for the length of the
+     * untrimmed body.
+     */
+    public byte[] getResponseBody() { return responseBody; }
+
+    public void setResponseBody(byte[] responseBody) { this.responseBody = responseBody; }
+
+    public String getResponseBodyAsString() {
+        if(responseBody != null) {
+            return new String(responseBody);
+        } else {
+            return null;
+        }
     }
 
     public String getResponseContentType() {

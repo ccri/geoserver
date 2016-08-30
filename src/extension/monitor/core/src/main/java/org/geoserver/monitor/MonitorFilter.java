@@ -149,6 +149,7 @@ public class MonitorFilter implements GeoServerFilter {
         data.setResponseContentType(response.getContentType());
         data.setResponseLength(((MonitorServletResponse)response).getContentLength());
         data.setResponseStatus(((MonitorServletResponse)response).getStatus());
+        data.setResponseBody(((MonitorServletResponse)response).getResponseBody());
         
         if (error != null) {
             data.setStatus(Status.FAILED);

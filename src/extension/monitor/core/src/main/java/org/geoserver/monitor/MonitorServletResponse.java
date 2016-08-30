@@ -5,8 +5,7 @@
  */
 package org.geoserver.monitor;
 
-import java.io.IOException;
-import java.io.OutputStream;
+import java.io.*;
 
 import javax.servlet.ServletOutputStream;
 import javax.servlet.http.HttpServletResponse;
@@ -27,6 +26,13 @@ public class MonitorServletResponse extends HttpServletResponseWrapper {
         }
         
         return output.getBytesWritten();
+    }
+
+    public byte[] getResponseBody() {
+        if (output == null) {
+            return new byte[0];
+        }
+        return output.getByteArray();
     }
     
     @Override
@@ -56,8 +62,10 @@ public class MonitorServletResponse extends HttpServletResponseWrapper {
 
     static class MonitorOutputStream extends ServletOutputStream {
 
+        int maxNBytesAllowed = 256;
         long nbytes;
         OutputStream delegate;
+        ByteArrayOutputStream byteStream = new ByteArrayOutputStream(maxNBytesAllowed);
 
         public MonitorOutputStream(OutputStream delegate) {
             this.delegate = delegate;
@@ -67,21 +75,31 @@ public class MonitorServletResponse extends HttpServletResponseWrapper {
             return nbytes;
         }
 
+        public byte[] getByteArray() {
+            return byteStream.toByteArray();
+        }
+
         @Override
         public void write(int b) throws IOException {
             delegate.write(b);
+            if (nbytes < maxNBytesAllowed) byteStream.write(b);
             ++nbytes;
         }
 
         @Override
         public void write(byte b[]) throws IOException {
-            delegate.write(b);
-            nbytes += b.length;
+            write(b, 0, b.length);
         }
 
         @Override
         public void write(byte b[], int off, int len) throws IOException {
             delegate.write(b, off, len);
+
+            long bytesLeftToWrite = Math.min(maxNBytesAllowed - nbytes, len);
+            for (int i = 0; i < bytesLeftToWrite; i++) {
+                byteStream.write(b[off + i]);
+            }
+
             nbytes += len;
         }
 
