@@ -10,6 +10,7 @@ import org.apache.wicket.markup.html.form.validation.IFormValidator
 import org.apache.wicket.markup.html.form.{Form, FormComponent}
 import org.apache.wicket.model.PropertyModel
 import org.geoserver.catalog.CoverageStoreInfo
+import org.locationtech.geomesa.accumulo.data.AccumuloDataStoreParams._
 import org.locationtech.geomesa.gs.GeoMesaStoreEditPanel
 import org.locationtech.geomesa.raster.wcs.AccumuloUrl
 
@@ -30,9 +31,9 @@ class GeoMesaCoverageStoreEditPanel(componentId: String, storeEditForm: Form[_])
   val auths = addTextPanel(paramsModel, authsParam)
   val visibilities = addTextPanel(paramsModel, visibilityParam)
   val tableName = addTextPanel(paramsModel, tableNameParam)
-  val collectStats = addCheckBoxPanel(paramsModel, statsParam)
+  val collectQueryStats = addCheckBoxPanel(paramsModel, collectQueryStatsParam)
 
-  val dependentFormComponents = Array[FormComponent[_]](instanceId, zookeepers, user, password, auths, visibilities, tableName)
+  val dependentFormComponents = Array[FormComponent[_]](instanceId, zookeepers, user, password, auths, visibilities, tableName, collectQueryStats)
   dependentFormComponents.map(_.setOutputMarkupId(true))
 
   storeEditForm.add(new IFormValidator() {
@@ -42,7 +43,7 @@ class GeoMesaCoverageStoreEditPanel(componentId: String, storeEditForm: Form[_])
       val storeInfo = form.getModelObject.asInstanceOf[CoverageStoreInfo]
       val accumuloUrl = AccumuloUrl(user.getValue, password.getValue, instanceId.getValue,
         zookeepers.getValue, tableName.getValue, Some(auths.getValue).filterNot(_.isEmpty),
-        Some(visibilities.getValue).filterNot(_.isEmpty), java.lang.Boolean.valueOf(collectStats.getValue))
+        Some(visibilities.getValue).filterNot(_.isEmpty), java.lang.Boolean.valueOf(collectQueryStats.getValue))
       storeInfo.setURL(accumuloUrl.url)
     }
   })
@@ -58,7 +59,7 @@ class GeoMesaCoverageStoreEditPanel(componentId: String, storeEditForm: Form[_])
       params.put("zookeepers", parsed.zookeepers)
       params.put("auths", parsed.auths.getOrElse(""))
       params.put("visibilities", parsed.visibilities.getOrElse(""))
-      params.put("collectStats", parsed.collectStats.toString)
+      params.put("collectQueryStats", parsed.collectStats.toString)
     }
     params
   }
