@@ -167,9 +167,10 @@ public class MonitorFilter implements GeoServerFilter {
         data = monitor.current();
         
         monitor.complete();
-        
+
         //post processing
-        postProcessExecutor.execute(new PostProcessTask(monitor, data, req, resp));
+        //todo: The PostProcessTasks can build up and cause out-of-memory...when have time figure out why, but don't need it right now
+        //postProcessExecutor.execute(new PostProcessTask(monitor, data, req, resp));
         
         if (error != null) {
             if (error instanceof RuntimeException) {
