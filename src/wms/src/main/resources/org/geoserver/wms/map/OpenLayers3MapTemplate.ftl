@@ -162,6 +162,7 @@
             <option value="image/png8">PNG 8bit</option>
             <option value="image/gif">GIF</option>
             <option id="jpeg" value="image/jpeg">JPEG</option>
+            <option id="jpeg-png" value="image/vnd.jpeg-png">JPEG-PNG</option>
           </select>
         </li>
         <li>
@@ -270,13 +271,15 @@
              <#list parameters as param>
                 ${param.name}: '${param.value?js_string}',
              </#list>
+             tilesOrigin: ${request.bbox.minX?c} + "," + ${request.bbox.minY?c}
           }
         })
       });
       var projection = new ol.proj.Projection({
           code: '${request.SRS?js_string}',
           units: '${units?js_string}',
-          axisOrientation: 'neu'
+          axisOrientation: 'neu',
+          global: ${global}
       });
       var map = new ol.Map({
         controls: ol.control.defaults({
@@ -325,6 +328,12 @@
         map.getLayers().forEach(function(lyr) {
           lyr.getSource().updateParams({'VERSION': wmsVersion});
         });
+        if(wmsVersion == "1.3.0") {
+            origin = bounds[1] + ',' + bounds[0];
+        } else {
+            origin = bounds[0] + ',' + bounds[1];
+        }
+        tiled.getSource().updateParams({'tilesOrigin': origin});
       }
 
       // Tiling mode, can be 'tiled' or 'untiled'

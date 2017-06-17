@@ -12,6 +12,8 @@ import static org.junit.Assert.assertTrue;
 
 import java.net.URLEncoder;
 import java.util.Collections;
+import java.util.concurrent.ExecutorCompletionService;
+import java.util.concurrent.Executors;
 
 import javax.xml.namespace.QName;
 
@@ -27,11 +29,13 @@ import org.geotools.gml3.v3_2.GML;
 import org.geotools.wfs.v2_0.WFS;
 import org.junit.Before;
 import org.junit.Test;
+import org.springframework.mock.web.MockHttpServletResponse;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 import org.w3c.dom.NodeList;
 
-import org.springframework.mock.web.MockHttpServletResponse;
+import static org.hamcrest.CoreMatchers.is;
+import static org.junit.Assert.assertThat;
 
 public class GetFeatureTest extends WFS20TestSupport {
 
@@ -73,6 +77,46 @@ public class GetFeatureTest extends WFS20TestSupport {
     public void testGet() throws Exception {
     	testGetFifteenAll("wfs?request=GetFeature&typenames=cdf:Fifteen&version=2.0.0&service=wfs");
     	testGetFifteenAll("wfs?request=GetFeature&typenames=(cdf:Fifteen)&version=2.0.0&service=wfs");
+    }
+    
+    @Test
+    public void testConcurrentGet() throws Exception {
+        ExecutorCompletionService<Object> es = new ExecutorCompletionService<>(Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors()));
+        final int REQUESTS =  200;
+        for (int i = 0; i < REQUESTS; i++) {
+            es.submit(() -> {
+                testGetFifteenAll("wfs?request=GetFeature&typenames=cdf:Fifteen&version=2.0.0&service=wfs");
+                return null;
+            });
+        }
+        // just check there are no exceptions
+        for (int i = 0; i < REQUESTS; i++) {
+            es.take().get();
+        }
+        
+    }
+    
+    @Test
+    public void testConcurrentPost() throws Exception {
+        ExecutorCompletionService<Object> es = new ExecutorCompletionService<>(Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors()));
+        final int REQUESTS =  200;
+        for (int i = 0; i < REQUESTS; i++) {
+            es.submit(() -> {
+                testPost();
+                return null;
+            });
+        }
+        // just check there are no exceptions
+        long start = System.currentTimeMillis();
+        for (int i = 0; i < REQUESTS; i++) {
+            es.take().get();
+            if(i % 100 == 0) {
+                long curr = System.currentTimeMillis();
+                LOGGER.info(i + " - " + (curr - start));
+                start = curr;
+            }
+        }
+        
     }
 
     @Test
@@ -1010,4 +1054,31 @@ public class GetFeatureTest extends WFS20TestSupport {
                 "//wfs:FeatureCollection/wfs:member/cdf:Fifteen/@gml:id", doc);
     }
 
+    @Test
+    public void testGml32MimeType() throws Exception {
+        // test GET request
+        String url = "wfs?request=GetFeature&typeName=cdf:Fifteen&version=2.0" +
+                "&service=wfs&featureid=Fifteen.2&outputFormat=gml32";
+        MockHttpServletResponse response = getAsServletResponse(url);
+        assertThat(response.getContentType(), is("application/gml+xml; version=3.2"));
+        // override GML 3.2 MIME type with text / xml
+        setGmlMimeTypeOverride("text/xml");
+        response =  getAsServletResponse(url);
+        assertThat(response.getContentType(), is("text/xml"));
+        setGmlMimeTypeOverride(null);
+        // test POST request
+        String xml = "<wfs:GetFeature service='WFS' version='2.0.0'" +
+                "                xmlns:cdf='http://www.opengis.net/cite/data'" +
+                "                xmlns:wfs='http://www.opengis.net/wfs/2.0'>" +
+                "    <wfs:Query typeNames='cdf:Other'>" +
+                "        <wfs:PropertyName>cdf:string2</wfs:PropertyName>" +
+                "    </wfs:Query>" +
+                "</wfs:GetFeature>";
+        response = postAsServletResponse("wfs", xml);
+        assertThat(response.getContentType(), is("application/gml+xml; version=3.2"));
+        // override GML 3.2 MIME type with text / xml
+        setGmlMimeTypeOverride("text/xml");
+        response =  postAsServletResponse("wfs", xml);
+        assertThat(response.getContentType(), is("text/xml"));
+    }
 }

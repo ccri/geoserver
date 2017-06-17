@@ -1,4 +1,4 @@
-/* Copyright (c) 2015 OpenPlans - www.openplans.org. All rights reserved.
+/* (c) 2015 - 2016 Open Source Geospatial Foundation - all rights reserved
  * This code is licensed under the GPL 2.0 license, available at the root
  * application directory.
  */
@@ -25,6 +25,7 @@ import org.geoserver.jdbcstore.internal.JDBCDirectoryStructure;
 import org.geoserver.jdbcstore.internal.JDBCResourceStoreProperties;
 import org.geoserver.platform.resource.LockProvider;
 import org.geoserver.platform.resource.NullLockProvider;
+import org.geoserver.platform.resource.Paths;
 import org.geoserver.platform.resource.Resource;
 import org.geoserver.platform.resource.ResourceListener;
 import org.geoserver.platform.resource.ResourceNotification;
@@ -114,7 +115,9 @@ public class JDBCResourceStore implements ResourceStore {
     
     @Override
     public Resource get(String path) {
-        if (oldResourceStore != null && ArrayUtils.contains(dir.getConfig().getIgnoreDirs(), path)) {
+        List<String> pathNames = Paths.names(path);
+        if (oldResourceStore != null && pathNames.size() > 0 &&
+                ArrayUtils.contains(dir.getConfig().getIgnoreDirs(), pathNames.get(0))) {
             return oldResourceStore.get(path);
         }
         return new JDBCResource(dir.createEntry(path));
@@ -140,9 +143,7 @@ public class JDBCResourceStore implements ResourceStore {
      * 
      */    
     protected class JDBCResource implements Resource {
-        
-        private static final long serialVersionUID = 1829574259576354635L;
-        
+
         private final JDBCDirectoryStructure.Entry entry;
         
         public JDBCResource(JDBCDirectoryStructure.Entry entry) {

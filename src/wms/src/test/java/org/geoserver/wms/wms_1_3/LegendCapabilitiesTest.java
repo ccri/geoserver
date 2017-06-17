@@ -1,4 +1,5 @@
-/* Copyright (c) 2001 - 2013 OpenPlans - www.openplans.org. All rights reserved.
+/* (c) 2014 - 2016 Open Source Geospatial Foundation - all rights reserved
+ * (c) 2001 - 2014 OpenPlans
  * This code is licensed under the GPL 2.0 license, available at the root
  * application directory.
  */
@@ -14,6 +15,7 @@ import javax.xml.namespace.QName;
 import org.custommonkey.xmlunit.SimpleNamespaceContext;
 import org.custommonkey.xmlunit.XMLUnit;
 import org.geoserver.catalog.LegendInfo;
+import org.geoserver.catalog.WorkspaceInfo;
 import org.geoserver.catalog.impl.LegendInfoImpl;
 import org.geoserver.config.GeoServerInfo;
 import org.geoserver.data.test.MockData;
@@ -41,8 +43,14 @@ public class LegendCapabilitiesTest extends WMSTestSupport {
     private static final int LEGEND_WIDTH = 22;
     private static final int LEGEND_HEIGHT = 22;
     private static final String LEGEND_FORMAT = "image/jpeg";
-    private static final String IMAGE_URL = "styles/legend.png";
+    private static final String IMAGE_URL = "legend.png";
     private static final String BASE = "src/test/resources/geoserver";
+    
+    private static final String LAYER_NAME_WS = "watertemp_ws";
+    private static final QName LAYER_QNAME_WS =
+            new QName(MockData.DEFAULT_URI, LAYER_NAME_WS, MockData.DEFAULT_PREFIX);
+    private static final String STYLE_NAME_WS = "temperature_ws";
+    
     @Override
     protected void onSetUp(SystemTestData testData) throws Exception {
         super.onSetUp(testData);
@@ -65,6 +73,27 @@ public class LegendCapabilitiesTest extends WMSTestSupport {
         testData.addRasterLayer(LAYER_QNAME, LAYER_FILE, null, propertyMap,
                 SystemTestData.class, getCatalog());
         
+        // Test for workspaced legend graphic
+        LegendInfo legendWs = new LegendInfoImpl();
+        legendWs.setWidth(LEGEND_WIDTH);
+        legendWs.setHeight(LEGEND_HEIGHT);
+        legendWs.setFormat(LEGEND_FORMAT);
+        legendWs.setOnlineResource(IMAGE_URL);
+        
+        // add legend.png to styles directory
+        Resource resourceWs = getResourceLoader().get("workspaces/gs/styles/legend.png");
+        getResourceLoader().copyFromClassPath( "../legend.png", resourceWs.file(),  getClass() );
+
+        // add layer
+        WorkspaceInfo wsInfo = getCatalog().getWorkspaceByName("gs");
+        testData.addStyle(wsInfo, STYLE_NAME_WS, STYLE_FILE, getClass(), getCatalog(), legendWs);
+        Map<SystemTestData.LayerProperty, Object> propertyMapWs =
+                new HashMap<SystemTestData.LayerProperty, Object>();
+        propertyMapWs.put(LayerProperty.STYLE, STYLE_NAME_WS);
+        testData.addRasterLayer(LAYER_QNAME_WS, LAYER_FILE, null, propertyMapWs,
+                SystemTestData.class, getCatalog());
+        
+        // For global set-up
         GeoServerInfo global = getGeoServer().getGlobal();
         global.getSettings().setProxyBaseUrl(BASE);
         getGeoServer().save(global);
@@ -93,6 +122,16 @@ public class LegendCapabilitiesTest extends WMSTestSupport {
         assertXpathEvaluatesTo(String.valueOf(LEGEND_WIDTH), legendUrlPath + "/@width", dom);
         assertXpathEvaluatesTo(String.valueOf(LEGEND_HEIGHT), legendUrlPath + "/@height", dom);
         assertXpathEvaluatesTo(LEGEND_FORMAT, legendUrlPath + "/wms:Format", dom);
-        assertXpathEvaluatesTo(BASE+"/"+IMAGE_URL, legendUrlPath + "/wms:OnlineResource/@xlink:href", dom);
+        assertXpathEvaluatesTo(BASE+"/styles/"+IMAGE_URL, legendUrlPath + "/wms:OnlineResource/@xlink:href", dom);
+        
+        final String legendUrlPathWs = "//wms:Layer[wms:Name='gs:" + LAYER_NAME_WS +
+                "']/wms:Style/wms:LegendURL";
+        
+        // Ensure capabilities document reflects the specified legend info
+        assertXpathEvaluatesTo(String.valueOf(LEGEND_WIDTH), legendUrlPathWs + "/@width", dom);
+        assertXpathEvaluatesTo(String.valueOf(LEGEND_HEIGHT), legendUrlPathWs + "/@height", dom);
+        assertXpathEvaluatesTo(LEGEND_FORMAT, legendUrlPathWs + "/wms:Format", dom);
+        assertXpathEvaluatesTo(BASE+"/styles/gs/"+IMAGE_URL, legendUrlPathWs + "/wms:OnlineResource/@xlink:href", dom);
+
     }
 }

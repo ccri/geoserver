@@ -5,7 +5,6 @@
  */
 package org.geoserver.wms;
 
-import org.geoserver.catalog.AttributeTypeInfo;
 import org.geoserver.catalog.CoverageInfo;
 import org.geoserver.catalog.FeatureTypeInfo;
 import org.geoserver.catalog.LayerInfo;
@@ -13,14 +12,13 @@ import org.geoserver.catalog.PublishedType;
 import org.geoserver.catalog.impl.AbstractCatalogValidator;
 import org.geotools.factory.GeoTools;
 
-import com.vividsolutions.jts.geom.Geometry;
-
 /**
  * Configuration validator for Web Map Service.
  * 
  * @author David Winslow, OpenGeo
  */
 public class WMSValidator extends AbstractCatalogValidator {
+    
     public void validate(LayerInfo lyr, boolean isNew) {
         if (lyr.isEnabled() == false) {
             // short-circuit - for disabled layers we don't need to validate
@@ -30,10 +28,11 @@ public class WMSValidator extends AbstractCatalogValidator {
 
         if (
             lyr.getResource() == null ||
-            (hasGeometry(lyr) && 
-                (lyr.getResource().getSRS() == null ||
-                 lyr.getResource().getLatLonBoundingBox() == null))
-        ) throw new RuntimeException( "Layer's resource is not fully configured");
+            ((lyr.getResource().getSRS() == null ||
+                 lyr.getResource().getLatLonBoundingBox() == null) && WMS.isWmsExposable(lyr))
+        ) {
+            throw new RuntimeException( "Layer's resource is not fully configured");
+        }
       
         // Resource-dependent checks
         if (lyr.getType() == PublishedType.RASTER) {
@@ -53,22 +52,11 @@ public class WMSValidator extends AbstractCatalogValidator {
         } else throw new RuntimeException("Layer is neither RASTER nor VECTOR type");
 
         // Style-dependent checks
-        if (hasGeometry(lyr) &&
-           (lyr.getDefaultStyle() == null || lyr.getStyles().contains(null))
-        ) throw new RuntimeException("Layer has null styles!");
-    }
-
-    private static boolean hasGeometry(LayerInfo lyr) {
-        if (lyr.getResource() instanceof CoverageInfo) return true;
-
-        if (lyr.getResource() instanceof FeatureTypeInfo) {
-            for (AttributeTypeInfo att : ((FeatureTypeInfo)lyr.getResource()).getAttributes()) {
-                if (Geometry.class.isAssignableFrom(att.getBinding())) {
-                    return true;
-                }
-            }
+        if ((lyr.getDefaultStyle() == null || lyr.getStyles().contains(null))
+                && WMS.isWmsExposable(lyr)) {
+            throw new RuntimeException("Layer has null styles!");
         }
-
-        return false;
     }
+
+    
 }

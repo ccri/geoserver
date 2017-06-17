@@ -155,10 +155,11 @@
     <!-- the schema cleaner -->
     <bean id="xsdSchemaCleaner" class="org.geoserver.wfs.xml.SchemaCleanerCallback"/>
 
-    <bean id="wfs20ExceptionHandler" class="org.geoserver.ows.OWS11ServiceExceptionHandler">
+    <bean id="wfs20ExceptionHandler" class="org.geoserver.wfs.response.Wfs2ExceptionHandler">
         <constructor-arg>
-           <ref bean="wfsService-2.0"/>
-        </constructor-arg>  
+            <ref bean="wfsService-2.0"/>
+        </constructor-arg>
+        <constructor-arg ref="geoServer"/>
         <property name="useServiceVersion" value="true"/>
     </bean>
 	
@@ -671,4 +672,8 @@
     <!-- XStream persister initializer -->
     <bean id="wfsXStreamPersisterInitializer" class="org.geoserver.wfs.WFSXStreamPersisterInitializer" />
 
+	  <!-- dispatcher callback that will enforce configured MIME type for WFS GML responses -->
+		<bean id="wfsGMLMimeTypeEnforcer" class="org.geoserver.wfs.WFSGMLMimeTypeEnforcer">
+			<constructor-arg ref="geoServer"/>
+		</bean>
 </beans>

@@ -22,21 +22,26 @@ Layers can be divided into two types of data: raster and vector. These two forma
 
    * - Field
      - Description
-   * - .. image:: img/data_layers_type1.png
-     - raster (grid)
-   * - .. image:: img/data_layers_type2.png
-     - vector (feature)
+   * - .. image:: img/raster_icon.png
+     - Raster (grid)
+   * - .. image:: img/polygon_icon.png
+     - Polygon
+   * - .. image:: img/line_string_icon.png
+     - Line
+   * - .. image:: img/point_icon.png
+     - Point
 
 Add a Layer
 -----------
 
-At the upper left-hand corner of the layers view page there are two buttons for the adding and removal of layers. The green plus button allows you to add a new layer (referred to as *resource*). The red minus button allows you to remove selected layers.
+At the upper left-hand corner of the layers view page there are two buttons for the adding and removal of layers. 
+The green plus button allows you to add a new layer. The red minus button allows you to remove selected layers.
 
 .. figure:: img/data_layers_add_remove.png
 
    Buttons to Add and Remove a Layer
 
-Clicking the :guilabel:`Add a new resource` button brings up a :guilabel:`New Layer Chooser` panel. The menu displays all currently enabled stores. From this menu, select the Store where the layer should be added.
+Clicking the :guilabel:`Add a new layer` button brings up a :guilabel:`New Layer Chooser` panel. The menu displays all currently enabled stores. From this menu, select the Store where the layer should be added.
 
 .. figure:: img/data_layers_add_chooser.png
 
@@ -209,6 +214,7 @@ Sets the WMS specific publishing parameters.
 * **Additional styles**—Other styles that can be associated with this layer. Some clients (and the GeoServer Layer Preview) will present those as styling alternatives for that layer to the user.
 * **Default rendering buffer**—Default value of the ``buffer`` GetMap/GetFeatureInfo vendor parameter. See the :ref:`wms_vendor_parameters` for more details.
 * **Default WMS path**—Location of the layer in the WMS capabilities layer tree. Useful for building non-opaque layer groups
+* **Default Interpolation Method**—Allows to specify a default resampling (interpolation) method for this layer. The available options are *Nearest neighbor*, *Bilinear*, *Bicubic*, or *Use service default*, which means that no layer specific configuration will be created (the default interpolation method selected in the WMS service configuration page will be used, see :ref:`Raster Rendering Options <services_webadmin_wms_raster_options>` for details). Can be overridden by the :ref:`interpolations vendor parameter <wms_vendor_parameter_interpolations>`.
 
 WMS Attribution
 ^^^^^^^^^^^^^^^

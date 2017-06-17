@@ -6,7 +6,9 @@
 package org.geoserver.web.data.store;
 
 import java.io.IOException;
+import java.io.Serializable;
 import java.util.Iterator;
+import java.util.Map.Entry;
 import java.util.logging.Logger;
 
 import org.apache.wicket.Component;
@@ -29,6 +31,8 @@ import org.geoserver.catalog.DataStoreInfo;
 import org.geoserver.catalog.NamespaceInfo;
 import org.geoserver.catalog.ResourcePool;
 import org.geoserver.catalog.WorkspaceInfo;
+import org.geoserver.platform.GeoServerEnvironment;
+import org.geoserver.platform.GeoServerExtensions;
 import org.geoserver.web.ComponentAuthorizer;
 import org.geoserver.web.GeoServerApplication;
 import org.geoserver.web.GeoServerSecuredPage;
@@ -275,17 +279,6 @@ abstract class AbstractDataAccessPage extends GeoServerSecuredPage {
             }
         }
         return null;
-    }
-
-    protected void clone(final DataStoreInfo source, DataStoreInfo target) {
-        target.setDescription(source.getDescription());
-        target.setEnabled(source.isEnabled());
-        target.setName(source.getName());
-        target.setWorkspace(source.getWorkspace());
-        target.setType(source.getType());
-
-        target.getConnectionParameters().clear();
-        target.getConnectionParameters().putAll(source.getConnectionParameters());
     }
 
     @Override

@@ -46,6 +46,7 @@ There are two options:
 **OGC_EXCEPTION_REPORT**: This is the default behavior. Any layer errors will show up as Service Exceptions in the capabilities document, making it invalid.
 
 **SKIP_MISCONFIGURED_LAYERS**: With this setting, GeoServer will elect simply to not describe the problem layer at all, removing it from the capabilities document, and preserving the integrity of the rest of the document. Note that having a layer "disappear" may cause other errors in client functionality.
+    This is the default setting starting with GeoServer 2.11 and allows for faster startups, as the stores connectivity does not need to be checked in advance.
 
 Number of Decimals
 ------------------
@@ -117,6 +118,22 @@ There are three options:
 **In-process locking**: Used to ensure individual configuration files cannot be modified by two web administration or REST sessions at the same time.
 
 **Disable Locking**: No file locking is used.
+
+Web/UI Mode
+-----------
+
+This configuration setting allows control over WebUI redirecting behaviour. By default, when the user loads a page that contains input, a HTTP 302 Redirect response is returned that causes a reload of that same with a generated session ID in the request parameter. This session ID allows the state of the page to be remembered after a refresh and prevents any occurence of the 'double submit problem'. However, this behaviour is incompatible with clustering of multiple geoserver instances.
+
+There are three options:
+
+**DEFAULT**: Use redirecting unless a clustering module has been loaded.
+
+**REDIRECT**: Always use redirecting (incompatible with clustering).
+
+**DO_NOT_REDIRECT**: Never use redirecting (does not remember state when reloading a page and may cause double submit).
+
+Note that a restart of GeoServer is necessary for a change in the setting to have effect.
+
 
 REST Disable Resource not found Logging
 ----------------------------------------

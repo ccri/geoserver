@@ -134,7 +134,7 @@ public class CascadeDeleteVisitor implements CatalogVisitor {
                 
                 // either update or remove the group
                 if(group.getLayers().size() == 0) {
-                    catalog.remove(group);
+                    visit(catalog.getLayerGroup(group.getId()));
                 } else {
                     catalog.save(group);
                 }
@@ -265,19 +265,47 @@ public class CascadeDeleteVisitor implements CatalogVisitor {
                 .list(LayerGroupInfo.class, associatedTo)) {
             while (it.hasNext()) {
                 LayerGroupInfo group = it.next();
-                if (group.getLayers().remove(layerGroupToRemove)) {
-                    if (group.getLayers().size() == 0) {
-                        // if group is empty, delete it
-                        visit(group);
-                    } else {
-                        catalog.save(group);
-                    }
+
+                // parallel remove of layer and styles
+                int index = getLayerGroupIndex(layerGroupToRemove, group);
+                while (index != -1) {
+                    group.getLayers().remove(index);
+                    group.getStyles().remove(index);
+                    index = getLayerGroupIndex(layerGroupToRemove, group);
+                }
+                if (group.getLayers().size() == 0) {
+                    // if group is empty, delete it
+                    visit(group);
+                } else {
+                    catalog.save(group);
                 }
             }
         }
         
         // finally remove the group
         catalog.remove(layerGroupToRemove);
+    }
+
+    /**
+     * Between modification proxies and security buffering the list of layers of a group it's just
+     * safer and more predictable to use a id comparison instead of a equals that accounts for
+     * each and every field
+     *  
+     * @param layerGroup
+     * @param container
+     * @return
+     */
+    private int getLayerGroupIndex(LayerGroupInfo layerGroup, LayerGroupInfo container) {
+        int idx = 0;
+        final String id = layerGroup.getId();
+        for (PublishedInfo pi : container.getLayers()) {
+            if(pi instanceof LayerGroupInfo && id.equals(pi.getId())) {
+                return idx; 
+            }
+            idx++;
+        }
+        
+        return -1;
     }
 
     public void visit(WMSLayerInfo wmsLayer) {

@@ -17,6 +17,8 @@ import org.apache.wicket.model.PropertyModel;
 import org.apache.wicket.model.ResourceModel;
 import org.apache.wicket.validation.validator.RangeValidator;
 import org.geoserver.catalog.WMSStoreInfo;
+import org.geoserver.platform.GeoServerEnvironment;
+import org.geoserver.platform.GeoServerExtensions;
 import org.geoserver.web.ComponentAuthorizer;
 import org.geoserver.web.GeoServerSecuredPage;
 import org.geoserver.web.data.store.panel.CheckBoxParamPanel;
@@ -174,21 +176,6 @@ abstract class AbstractWMSStorePage extends GeoServerSecuredPage {
      */
     protected abstract void onSave(WMSStoreInfo info, AjaxRequestTarget target)
             throws IllegalArgumentException;
-
-    protected void clone(final WMSStoreInfo source, WMSStoreInfo target) {
-        target.setDescription(source.getDescription());
-        target.setEnabled(source.isEnabled());
-        target.setName(source.getName());
-        target.setType(source.getType());
-        target.setCapabilitiesURL(source.getCapabilitiesURL());
-        target.setWorkspace(source.getWorkspace());
-        target.setUsername(source.getUsername());
-        target.setPassword(source.getPassword());
-        target.setUseConnectionPooling(source.isUseConnectionPooling());
-        target.setMaxConnections(source.getMaxConnections());
-        target.setConnectTimeout(source.getConnectTimeout());
-        target.setReadTimeout(source.getReadTimeout());
-    }
 
     @Override
     protected ComponentAuthorizer getPageAuthorizer() {

@@ -5,6 +5,10 @@
  */
 package org.geoserver.web.data.store;
 
+import java.io.Serializable;
+import java.util.Map.Entry;
+
+import org.apache.commons.lang.SerializationUtils;
 import org.apache.wicket.ajax.AjaxRequestTarget;
 import org.apache.wicket.ajax.markup.html.form.AjaxSubmitLink;
 import org.apache.wicket.markup.html.basic.Label;
@@ -16,6 +20,8 @@ import org.apache.wicket.model.Model;
 import org.apache.wicket.model.PropertyModel;
 import org.apache.wicket.model.ResourceModel;
 import org.geoserver.catalog.CoverageStoreInfo;
+import org.geoserver.platform.GeoServerEnvironment;
+import org.geoserver.platform.GeoServerExtensions;
 import org.geoserver.web.ComponentAuthorizer;
 import org.geoserver.web.GeoServerApplication;
 import org.geoserver.web.GeoServerSecuredPage;
@@ -134,15 +140,6 @@ abstract class AbstractCoverageStorePage extends GeoServerSecuredPage {
      */
     protected abstract void onSave(CoverageStoreInfo info, AjaxRequestTarget target)
             throws IllegalArgumentException;
-
-    protected void clone(final CoverageStoreInfo source, CoverageStoreInfo target) {
-        target.setDescription(source.getDescription());
-        target.setEnabled(source.isEnabled());
-        target.setName(source.getName());
-        target.setType(source.getType());
-        target.setURL(source.getURL());
-        target.setWorkspace(source.getWorkspace());
-    }
 
     @Override
     protected ComponentAuthorizer getPageAuthorizer() {

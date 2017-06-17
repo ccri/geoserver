@@ -148,13 +148,16 @@ public interface GeoServerInfo extends Info {
     void setNumDecimals(int numDecimals);
 
     /**
-     * TODO: not sure what this is supposed to do.
+     * Provider web site (used for default contact information, or service provider information if user has not filled in contact details.
+     * 
      * @deprecated use {@link #getSettings()}
      */
     String getOnlineResource();
     
     /**
-     * @deprecated use {@link #getSettings()}
+     * Provider web site (used for default contact information, or service provider information if user has not filled in contact details.
+     * 
+     * @param onlineResource Provider website
      */
     void setOnlineResource(String onlineResource);
 
@@ -339,5 +342,38 @@ public interface GeoServerInfo extends Info {
      * Disposes the global configuration object.
      */
     void dispose();
+    
+
+    /**
+     * WebUIMode choices
+     */
+    public enum WebUIMode {
+        /**
+         * Let GeoServer determine the best mode.
+         */
+        DEFAULT,
+        /**
+         * Always redirect to persist page state (prevent double submit problem but doesn't support clustering)
+         */
+        REDIRECT,
+        /**
+         * Never redirect to persist page state (supports clustering but doesn't prevent double submit problem)
+         */
+        DO_NOT_REDIRECT
+    };
+
+    /**
+     * Get the WebUIMode
+     *
+     * @return the WebUIMode
+     */
+    public WebUIMode getWebUIMode();
+
+    /**
+     * Set the WebUIMode
+     *
+     * @param mode
+     */
+    public void setWebUIMode(WebUIMode mode);
 
 }

@@ -131,27 +131,31 @@ public class WMSAdminPage extends BaseServiceAdminPage<WMSInfo> {
         TextField<Integer> maxErrors = new TextField<Integer>("maxRenderingErrors");
         maxErrors.add(RangeValidator.minimum(0));
         form.add(maxErrors);
-    	// watermark
-    	form.add(new CheckBox("watermark.enabled"));
-    	TextField watermarkUrlField = new TextField("watermark.uRL", new FileModel(new PropertyModel<String>(form.getModel(), "watermark.URL")));
-    	watermarkUrlField.add(new FileExistsValidator(true));
-    	watermarkUrlField.setOutputMarkupId(true);
+        // map buffer
+        TextField<Integer> maxBuffer = new TextField<Integer>("maxBuffer");
+        maxBuffer.add(RangeValidator.minimum(0));
+        form.add(maxBuffer);
+        // watermark
+        form.add(new CheckBox("watermark.enabled"));
+        TextField watermarkUrlField = new TextField("watermark.uRL", new FileModel(new PropertyModel<String>(form.getModel(), "watermark.URL")));
+        watermarkUrlField.add(new FileExistsValidator(true));
+        watermarkUrlField.setOutputMarkupId(true);
         form.add(watermarkUrlField);
         form.add(chooserButton("chooser", new ParamResourceModel("chooseWatermark", this).getString(), watermarkUrlField));
-    	TextField<Integer> transparency = new TextField<Integer>("watermark.transparency");
-    	transparency.add(new RangeValidator<Integer>(0,100));
+        TextField<Integer> transparency = new TextField<Integer>("watermark.transparency");
+        transparency.add(new RangeValidator<Integer>(0,100));
         form.add(transparency);
-    	form.add(new DropDownChoice("watermark.position", Arrays.asList(Position.values()), new WatermarkPositionRenderer()));
-    	// svg
+        form.add(new DropDownChoice("watermark.position", Arrays.asList(Position.values()), new WatermarkPositionRenderer()));
+        // svg
         form.add(new CheckBox("svg.antialias", new MapModel(metadataModel, "svgAntiAlias")));
-    	form.add(new DropDownChoice("svg.producer", new MapModel(metadataModel, "svgRenderer"), SVG_RENDERERS, new SVGMethodRenderer()));
-    	// png compression levels
-    	MapModel pngCompression = defaultedModel(metadataModel, WMS.PNG_COMPRESSION, WMS.PNG_COMPRESSION_DEFAULT);
+        form.add(new DropDownChoice("svg.producer", new MapModel(metadataModel, "svgRenderer"), SVG_RENDERERS, new SVGMethodRenderer()));
+        // png compression levels
+        MapModel pngCompression = defaultedModel(metadataModel, WMS.PNG_COMPRESSION, WMS.PNG_COMPRESSION_DEFAULT);
         TextField<Integer> pngCompressionField = new TextField<Integer>("png.compression", pngCompression, Integer.class);
         pngCompressionField.add(new RangeValidator<Integer>(0, 100));
         form.add(pngCompressionField);
         // jpeg compression levels
-    	MapModel jpegCompression = defaultedModel(metadataModel, WMS.JPEG_COMPRESSION, WMS.JPEG_COMPRESSION_DEFAULT);
+        MapModel jpegCompression = defaultedModel(metadataModel, WMS.JPEG_COMPRESSION, WMS.JPEG_COMPRESSION_DEFAULT);
         TextField<Integer> jpegCompressionField = new TextField<Integer>("jpeg.compression", jpegCompression, Integer.class);
         jpegCompressionField.add(new RangeValidator<Integer>(0,100));
         form.add(jpegCompressionField);
@@ -228,8 +232,13 @@ public class WMSAdminPage extends BaseServiceAdminPage<WMSInfo> {
                                
         form.add(getFeatureInfoMimeTypesComponent =new MimeTypesFormComponent("getFeatureInfoMimeTypes",
                 new ListModel<String>(getFeatureInfoSelected),new CollectionModel<String>(getFeatureInfoChoices),
-                new PropertyModel<Boolean>(info, "getFeatureInfoMimeTypeCheckingEnabled").getObject()));                                                           
-        
+                new PropertyModel<Boolean>(info, "getFeatureInfoMimeTypeCheckingEnabled").getObject()));
+
+        //dynamicStylingDisabled
+        form.add(new CheckBox("dynamicStyling.disabled",new PropertyModel<Boolean>(info, WMS.DYNAMIC_STYLING_DISABLED)));
+
+        // disable the reprojection of GetFeatureInfo results
+        form.add(new CheckBox("disableFeaturesReproject", new PropertyModel<>(info, WMS.FEATURES_REPROJECTION_DISABLED)));
     }
     
     @Override

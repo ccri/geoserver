@@ -1,4 +1,4 @@
-/* (c) 2014 Open Source Geospatial Foundation - all rights reserved
+/* (c) 2014 - 2016 Open Source Geospatial Foundation - all rights reserved
  * (c) 2001 - 2013 OpenPlans
  * This code is licensed under the GPL 2.0 license, available at the root
  * application directory.
@@ -9,9 +9,10 @@ import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkNotNull;
 import static org.geoserver.gwc.GWC.tileLayerName;
 
-import java.io.File;
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -20,6 +21,7 @@ import org.geoserver.catalog.Catalog;
 import org.geoserver.catalog.LayerGroupInfo;
 import org.geoserver.catalog.LayerInfo;
 import org.geoserver.catalog.MetadataMap;
+import org.geoserver.catalog.PublishedInfo;
 import org.geoserver.config.GeoServer;
 import org.geoserver.config.GeoServerInitializer;
 import org.geoserver.gwc.ConfigurableBlobStore;
@@ -29,6 +31,7 @@ import org.geoserver.gwc.layer.GeoServerTileLayerInfoImpl;
 import org.geoserver.gwc.layer.LegacyTileLayerInfoLoader;
 import org.geoserver.gwc.layer.TileLayerCatalog;
 import org.geoserver.gwc.layer.TileLayerInfoUtil;
+import org.geoserver.gwc.wmts.WMTSInfo;
 import org.geoserver.platform.resource.Resource;
 import org.geoserver.platform.resource.Resource.Type;
 import org.geoserver.wms.WMSInfo;
@@ -37,6 +40,7 @@ import org.geotools.util.logging.Logging;
 import org.geowebcache.storage.blobstore.memory.CacheConfiguration;
 import org.geowebcache.storage.blobstore.memory.CacheProvider;
 import org.geowebcache.storage.blobstore.memory.guava.GuavaCacheProvider;
+import org.opengis.filter.Filter;
 
 /**
  * GeoSever initialization hook that preserves backwards compatible GWC configuration at start up.
@@ -91,7 +95,7 @@ public class GWCInitializer implements GeoServerInitializer {
         LOGGER.info("Initializing GeoServer specific GWC configuration from "
                 + GWCConfigPersister.GWC_CONFIG_FILE);
 
-        final Version currentVersion = new Version("1.0.0");
+        final Version currentVersion = new Version("1.1.0");
         final Resource configFile = configPersister.findConfigFile();
         if (configFile == null || configFile.getType() != Type.RESOURCE) {
             LOGGER.fine("GWC's GeoServer specific configuration not found, creating with old defaults");
@@ -104,6 +108,17 @@ public class GWCInitializer implements GeoServerInitializer {
 
         final GWCConfig config = configPersister.getConfig();
         final Version version = new Version(config.getVersion());
+
+        if (version.compareTo(new Version("2.0.0")) < 0 && config.isWMTSEnabled() != null) {
+            // setting WMTS enabling information based on old GWC configuration setting
+            WMTSInfo globalServiceInfo = geoServer.getFacade().getService(WMTSInfo.class);
+            globalServiceInfo.setEnabled(config.isWMTSEnabled());
+            geoServer.save(globalServiceInfo);
+            // overriding configuration
+            config.setWMTSEnabled(null);
+            configPersister.save(config);
+        }
+
         if (currentVersion.compareTo(version) > 0) {
             // got the global config file, so old defaults are already in place if need be. Now
             // check whether we need to migrate the configuration from the Layer/GroupInfo metadata
@@ -278,40 +293,24 @@ public class GWCInitializer implements GeoServerInitializer {
         if(LOGGER.isLoggable(Level.FINEST)){
             LOGGER.finest("Adding Layers to avoid In Memory Caching");
         }
-        // Cycle on the Layers
-        for (LayerInfo layer : rawCatalog.getLayers()) {
-            if (!CatalogConfiguration.isLayerExposable(layer)) {
-                continue;
-            }
+        List<PublishedInfo> publisheds = new ArrayList<>(rawCatalog.getLayers());
+        publisheds.addAll(rawCatalog.getLayerGroups());
+        publisheds.parallelStream().forEach(layer -> {
             try {
                 // Check if the Layer must not be cached
                 GeoServerTileLayerInfo tileLayerInfo = tileLayerCatalog.getLayerById(layer.getId());
                 if (tileLayerInfo != null && tileLayerInfo.isEnabled()
                         && !tileLayerInfo.isInMemoryCached()) {
                     // Add it to the cache
-                    cache.addUncachedLayer(tileLayerInfo.getName());
+                    synchronized(cache) {
+                        cache.addUncachedLayer(tileLayerInfo.getName());
+                    }
                 }
             } catch (RuntimeException e) {
                 LOGGER.log(Level.WARNING, "Error occurred retrieving Layer '" + layer.getName()
                         + "'", e);
             }
-        }
-
-        // Cycle on the Layergroups
-        for (LayerGroupInfo layer : rawCatalog.getLayerGroups()) {
-            try {
-                // Check if the LayerGroup must not be cached
-                GeoServerTileLayerInfo tileLayerInfo = tileLayerCatalog.getLayerById(layer.getId());
-                if (tileLayerInfo != null && tileLayerInfo.isEnabled()
-                        && !tileLayerInfo.isInMemoryCached()) {
-                    // Add it to the cache
-                    cache.addUncachedLayer(tileLayerInfo.getName());
-                }
-            } catch (RuntimeException e) {
-                LOGGER.log(Level.WARNING, "Error occurred retrieving LayerGroup '"
-                        + tileLayerName(layer) + "'", e);
-            }
-        }
+        });
     }
 
     /**

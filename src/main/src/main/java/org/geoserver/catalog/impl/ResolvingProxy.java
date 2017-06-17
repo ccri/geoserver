@@ -5,9 +5,12 @@
  */
 package org.geoserver.catalog.impl;
 
+import java.lang.reflect.Constructor;
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 import org.geoserver.catalog.Catalog;
 import org.geoserver.catalog.CoverageInfo;
@@ -31,6 +34,11 @@ import org.geoserver.catalog.WorkspaceInfo;
  *
  */
 public class ResolvingProxy extends ProxyBase {
+    
+    /**
+     * Avoids the cost of looking up over and over the same proxy class
+     */
+    static final Map<Class, Constructor> PROXY_CLASS_CONSTRUCTOR_CACHE = new ConcurrentHashMap<>();
 
     /**
      * Wraps an object in the proxy.
@@ -48,22 +56,24 @@ public class ResolvingProxy extends ProxyBase {
      */
     public static <T> T create( String ref, String prefix, Class<T> clazz ) {
         InvocationHandler h = new ResolvingProxy(ref, prefix);
-        
-        Class proxyClass = 
-            Proxy.getProxyClass( clazz.getClassLoader(), clazz );
-        
+
         T proxy;
         try {
-            proxy = (T) proxyClass.getConstructor(
-                new Class[] { InvocationHandler.class }).newInstance(new Object[] { h } );
-        }
-        catch( Exception e ) {
+            Constructor<T> constructor = PROXY_CLASS_CONSTRUCTOR_CACHE.get(clazz);
+            if(constructor == null) {
+                Class proxyClass = 
+                        Proxy.getProxyClass( clazz.getClassLoader(), clazz );
+                constructor = proxyClass.getConstructor(new Class[] { InvocationHandler.class });
+            }
+            proxy = (T) constructor.newInstance(new Object[] { h } );
+        } catch( Exception e ) {
             throw new RuntimeException( e );
         }
         
         return proxy;
     }
     
+    @SuppressWarnings("unchecked")
     public static <T> T resolve( Catalog catalog, T object ) {
         if ( object instanceof Proxy ) {
             InvocationHandler h = Proxy.getInvocationHandler( object );
@@ -94,17 +104,38 @@ public class ResolvingProxy extends ProxyBase {
                         return (T) catalog.getCoverageStore( ref );
                     }
                     
-                    return (T) catalog.getStore( ref, StoreInfo.class );
+                    T resolved = (T) catalog.getStore( ref, StoreInfo.class );
+                    if (resolved == null) {
+                        if (ref.indexOf(":") > 0) {
+                            String[] qualifiedName = ref.split(":");
+                            resolved = (T) catalog.getStoreByName( qualifiedName[0], qualifiedName[1], StoreInfo.class );
+                        } else {
+                            resolved = (T) catalog.getStoreByName( ref, StoreInfo.class );
+                        }
+                    }
+                    return resolved;
                 }
                 if ( object instanceof ResourceInfo ) {
                     if ( object instanceof FeatureTypeInfo ) {
-                        return (T) catalog.getFeatureType( ref );
+                        Object r = catalog.getFeatureType( ref ); 
+                        if ( r == null ) {
+                            r = catalog.getFeatureTypeByName( ref );
+                        }
+                        return (T) r;
                     }
                     if ( object instanceof CoverageInfo ) {
-                        return (T) catalog.getCoverage( ref );
+                        Object r = catalog.getCoverage( ref ); 
+                        if ( r == null ) {
+                            r = catalog.getCoverageByName( ref );
+                        }
+                        return (T) r;
                     }
                     
-                    return (T) catalog.getResource( ref, ResourceInfo.class );
+                    Object r = catalog.getResource( ref, ResourceInfo.class );
+                    if ( r == null ) {
+                        r = catalog.getResourceByName( ref, ResourceInfo.class );
+                    }
+                    return (T) r;
                 }
                 if ( object instanceof LayerInfo ) {
                     Object l = catalog.getLayer( ref );

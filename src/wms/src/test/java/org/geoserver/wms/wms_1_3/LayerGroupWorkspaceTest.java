@@ -59,13 +59,14 @@ public class LayerGroupWorkspaceTest extends WMSTestSupport {
     @After
     public void rollback() throws Exception {
         Catalog cat = getCatalog();
+        if(nested != null) {
+            cat.remove(nested);
+        }
         cat.remove(cite);
         cat.remove(sf);
         cat.remove(global);
         cat.remove(global2);
-        if(nested != null) {
-            cat.remove(nested);
-        }
+
     }
     
     protected void registerNamespaces(java.util.Map<String,String> namespaces) {
@@ -135,7 +136,7 @@ public class LayerGroupWorkspaceTest extends WMSTestSupport {
         assertXpathExists("/wms:WMS_Capabilities/wms:Capability/wms:Layer/wms:Layer/wms:Name[text() = 'base']", dom);
 
         // check it doesn't have children Layers
-        assertXpathNotExists("/wms:WMS_Capabilities/wms:Capability/wms:Layer/wms:Layer/wms:Layer", dom);
+        assertXpathNotExists("/wms:WMS_Capabilities/wms:Capability/wms:Layer/wms:Layer[Name = 'base']/wms:Layer", dom);
         
         // check its layers are present at the same level
         assertXpathExists("/wms:WMS_Capabilities/wms:Capability/wms:Layer/wms:Layer/wms:Name[text() = 'cite:Lakes']", dom);

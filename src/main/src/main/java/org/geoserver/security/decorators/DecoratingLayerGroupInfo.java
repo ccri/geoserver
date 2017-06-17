@@ -10,6 +10,7 @@ import java.util.List;
 import org.geoserver.catalog.AttributionInfo;
 import org.geoserver.catalog.AuthorityURLInfo;
 import org.geoserver.catalog.CatalogVisitor;
+import org.geoserver.catalog.KeywordInfo;
 import org.geoserver.catalog.LayerGroupHelper;
 import org.geoserver.catalog.LayerGroupInfo;
 import org.geoserver.catalog.LayerIdentifierInfo;
@@ -17,8 +18,8 @@ import org.geoserver.catalog.LayerInfo;
 import org.geoserver.catalog.MetadataLinkInfo;
 import org.geoserver.catalog.MetadataMap;
 import org.geoserver.catalog.PublishedInfo;
-import org.geoserver.catalog.StyleInfo;
 import org.geoserver.catalog.PublishedType;
+import org.geoserver.catalog.StyleInfo;
 import org.geoserver.catalog.WorkspaceInfo;
 import org.geoserver.catalog.impl.AbstractDecorator;
 import org.geotools.geometry.jts.ReferencedEnvelope;
@@ -164,7 +165,7 @@ public class DecoratingLayerGroupInfo extends AbstractDecorator<LayerGroupInfo> 
     
     @Override
     public void accept(CatalogVisitor visitor) {
-        delegate.accept(visitor);
+        visitor.visit(this);
     }
     
     @Override
@@ -206,5 +207,20 @@ public class DecoratingLayerGroupInfo extends AbstractDecorator<LayerGroupInfo> 
     @Override
     public List<MetadataLinkInfo> getMetadataLinks() {
         return delegate.getMetadataLinks();
+    }
+    
+    @Override
+    public boolean equals(Object obj) {
+        return LayerGroupInfo.equals(this, obj);
+    }
+    
+    @Override
+    public int hashCode() {
+        return LayerGroupInfo.hashCode(this);
+    }
+
+    @Override
+    public List<KeywordInfo> getKeywords() {
+        return delegate.getKeywords();
     }
 }

@@ -7,6 +7,8 @@ package org.geoserver.web.data.store;
 
 import java.io.IOException;
 import java.net.URL;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.logging.Level;
 
 import javax.management.RuntimeErrorException;
@@ -18,11 +20,19 @@ import org.apache.wicket.validation.IValidator;
 import org.apache.wicket.validation.ValidationError;
 import org.geoserver.catalog.CatalogBuilder;
 import org.geoserver.catalog.WMSStoreInfo;
+import org.geoserver.platform.GeoServerEnvironment;
+import org.geoserver.platform.GeoServerExtensions;
+import org.geoserver.util.EntityResolverProvider;
 import org.geoserver.web.data.layer.NewLayerPage;
 import org.geotools.data.ows.HTTPClient;
 import org.geotools.data.ows.SimpleHttpClient;
 import org.geotools.data.wms.WebMapServer;
+import org.geotools.data.wms.xml.WMSSchema;
 import org.geotools.ows.ServiceException;
+import org.geotools.xml.DocumentFactory;
+import org.geotools.xml.XMLHandlerHints;
+import org.geotools.xml.handlers.DocumentHandler;
+import org.xml.sax.EntityResolver;
 
 public class WMSStoreNewPage extends AbstractWMSStorePage {
 
@@ -32,7 +42,13 @@ public class WMSStoreNewPage extends AbstractWMSStorePage {
             WMSStoreInfo store = builder.buildWMSStore(null);
 
             initUI(store);
-            capabilitiesURL.getFormComponent().add(new WMSCapabilitiesURLValidator());
+            
+            final GeoServerEnvironment gsEnvironment = GeoServerExtensions.bean(GeoServerEnvironment.class);
+            
+            // AF: Disable Binding if GeoServer Env Parametrization is enabled!
+            if (gsEnvironment == null || !GeoServerEnvironment.ALLOW_ENV_PARAMETRIZATION) {
+                capabilitiesURL.getFormComponent().add(new WMSCapabilitiesURLValidator());
+            }
         } catch (IOException e) {
             throw new RuntimeException("Could not setup the WMS store: " + e.getMessage(), e);
         }
@@ -45,14 +61,19 @@ public class WMSStoreNewPage extends AbstractWMSStorePage {
          * Try saving a copy of it so if the process fails somehow the original "info" does not end
          * up with an id set
          */
+        WMSStoreInfo expandedStore = getCatalog().getResourcePool().clone(info, true);
         WMSStoreInfo savedStore = getCatalog().getFactory().createWebMapServer();
-        clone(info, savedStore);
 
         // GR: this shouldn't fail, the Catalog.save(StoreInfo) API does not declare any action in
         // case of a failure!... strange, why a save can't fail?
         // Still, be cautious and wrap it in a try/catch block so the page does not blow up
         try {
-            getCatalog().validate(savedStore, false).throwIfInvalid();
+            // GeoServer Env substitution; validate first
+            getCatalog().validate(expandedStore, false).throwIfInvalid();
+            
+            // GeoServer Env substitution; force to *AVOID* resolving env placeholders...
+            savedStore = getCatalog().getResourcePool().clone(info, false);
+            // ... and save
             getCatalog().save(savedStore);
         } catch (RuntimeException e) {
             LOGGER.log(Level.INFO, "Adding the store for " + info.getCapabilitiesURL(), e);
@@ -64,11 +85,13 @@ public class WMSStoreNewPage extends AbstractWMSStorePage {
         // coverage while the getotools coverage api does not allow for more than one
         NewLayerPage layerChooserPage;
         try {
+            // The ID is assigned by the catalog and therefore cannot be cloned
             layerChooserPage = new NewLayerPage(savedStore.getId());
         } catch (RuntimeException e) {
             LOGGER.log(Level.INFO, "Getting list of layers for the WMS store " + info.getCapabilitiesURL(), e);
             // doh, can't present the list of coverages, means saving the StoreInfo is meaningless.
             try {// be extra cautious
+                getCatalog().remove(expandedStore);
                 getCatalog().remove(savedStore);
             } catch (RuntimeErrorException shouldNotHappen) {
                 LOGGER.log(Level.WARNING, "Can't remove CoverageStoreInfo after adding it!", e);
@@ -95,7 +118,18 @@ public class WMSStoreNewPage extends AbstractWMSStorePage {
                     client.setUser(user);
                     client.setPassword(pwd);
                 }
-                WebMapServer server = new WebMapServer(new URL(url), client);
+                Map<String, Object> hints = new HashMap<>();
+                hints.put(DocumentHandler.DEFAULT_NAMESPACE_HINT_KEY, WMSSchema.getInstance());
+                hints.put(DocumentFactory.VALIDATION_HINT, Boolean.FALSE);
+                EntityResolverProvider provider = getCatalog().getResourcePool().getEntityResolverProvider();
+                if(provider != null) {
+                    EntityResolver entityResolver = provider.getEntityResolver();
+                    if(entityResolver != null) {
+                        hints.put(XMLHandlerHints.ENTITY_RESOLVER, entityResolver);
+                    }
+                }
+                
+                WebMapServer server = new WebMapServer(new URL(url), client, hints);
                 server.getCapabilities();
             } catch(IOException | ServiceException e) {
                 IValidationError err = new ValidationError("WMSCapabilitiesValidator.connectionFailure")

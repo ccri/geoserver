@@ -15,9 +15,6 @@ import org.apache.wicket.markup.html.form.Form;
 import org.apache.wicket.markup.html.form.TextField;
 import org.apache.wicket.markup.html.panel.FeedbackPanel;
 import org.apache.wicket.model.CompoundPropertyModel;
-import org.apache.wicket.model.StringResourceModel;
-import org.apache.wicket.util.visit.IVisit;
-import org.apache.wicket.util.visit.IVisitor;
 import org.geoserver.cluster.JMSFactory;
 import org.geoserver.cluster.client.JMSContainer;
 import org.geoserver.cluster.configuration.BrokerConfiguration;
@@ -55,27 +52,28 @@ public class ClusterPage extends GeoServerSecuredPage {
 
         // add broker URL setting
         final TextField<String> brokerURL = new TextField<String>(
-                BrokerConfiguration.BROKER_URL_KEY);
+                BrokerConfiguration.BROKER_URL_KEY, String.class);
         form.add(brokerURL);
 
         // add group name setting
         final TextField<String> instanceName = new TextField<String>(
-                JMSConfiguration.INSTANCE_NAME_KEY);
+                JMSConfiguration.INSTANCE_NAME_KEY, String.class);
         form.add(instanceName);
         
         // add instance name setting
         final TextField<String> group = new TextField<String>(
-                JMSConfiguration.GROUP_KEY);
+                JMSConfiguration.GROUP_KEY, String.class);
         form.add(group);
 
         // add topic name setting
-        final TextField<String> topicName = new TextField<String>(TopicConfiguration.TOPIC_NAME_KEY);
+        final TextField<String> topicName = new TextField<String>(
+                TopicConfiguration.TOPIC_NAME_KEY, String.class);
         topicName.setType(String.class);
         form.add(topicName);
 
         // add connection status info
         final TextField<String> connectionInfo = new TextField<String>(
-                ConnectionConfiguration.CONNECTION_KEY);
+                ConnectionConfiguration.CONNECTION_KEY, String.class);
 
         // https://issues.apache.org/jira/browse/WICKET-2426
         connectionInfo.setType(String.class);
@@ -85,8 +83,7 @@ public class ClusterPage extends GeoServerSecuredPage {
         connectionInfo.setEnabled(false);
         form.add(connectionInfo);
 
-        final AjaxButton connection = new AjaxButton("connectionB", new StringResourceModel(
-                ConnectionConfiguration.CONNECTION_KEY, this, null)) {
+        final AjaxButton connection = new AjaxButton("connectionB") {
             /** serialVersionUID */
             private static final long serialVersionUID = 1L;
 
@@ -149,8 +146,7 @@ public class ClusterPage extends GeoServerSecuredPage {
         readOnlyInfo.setEnabled(false);
         form.add(readOnlyInfo);
 
-        final AjaxButton readOnly = new AjaxButton("readOnlyB", new StringResourceModel(
-                ReadOnlyConfiguration.READ_ONLY_KEY, this, null)) {
+        final AjaxButton readOnly = new AjaxButton("readOnlyB") {
             /** serialVersionUID */
             private static final long serialVersionUID = 1L;
 
@@ -170,7 +166,9 @@ public class ClusterPage extends GeoServerSecuredPage {
         };
         form.add(readOnly);
 
-        final Button save = new Button("saveB", new StringResourceModel("save", this, null)) {
+        final Button save = new Button("saveB"
+
+        ) {
             /** serialVersionUID */
             private static final long serialVersionUID = 1L;
 
@@ -200,9 +198,7 @@ public class ClusterPage extends GeoServerSecuredPage {
         embeddedBrokerInfo.setEnabled(false);
         form.add(embeddedBrokerInfo);
 
-        final AjaxButton embeddedBroker = new AjaxButton(
-                "embeddedBrokerB",
-                new StringResourceModel(EmbeddedBrokerConfiguration.EMBEDDED_BROKER_KEY, this, null)) {
+        final AjaxButton embeddedBroker = new AjaxButton("embeddedBrokerB") {
             /** serialVersionUID */
             private static final long serialVersionUID = 1L;
 
@@ -256,7 +252,7 @@ public class ClusterPage extends GeoServerSecuredPage {
     private void addToggle(final String configKey, final ToggleType type, final String textFieldId,
             final String buttonId, final Form<?> form, final FeedbackPanel fp) {
 
-        final TextField<String> toggleInfo = new TextField<String>(textFieldId);
+        final TextField<String> toggleInfo = new TextField<String>(textFieldId, String.class);
 
         // https://issues.apache.org/jira/browse/WICKET-2426
         // toggleInfo.setType(String.class);

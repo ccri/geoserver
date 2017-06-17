@@ -3,7 +3,7 @@
 Implementing a simple OWS service
 =================================
 
-This section explains How to Create a Simple GeoServer OWS service for Geoserver using the following scenario. The service should supply a capabilities document which advertises a single operation called "sayHello". The result of a sayHello operation is the simple string "Hello World".
+This section explains How to Create a Simple GeoServer OWS service for GeoServer using the following scenario. The service should supply a capabilities document which advertises a single operation called "sayHello". The result of a sayHello operation is the simple string "Hello World".
 
 .. contents::
 
@@ -248,9 +248,9 @@ it directly from sources.
 
 #. From the root of the GeoServer source tree run the following maven command:
 
-   .. code-block: sh
+  .. code-block:: sh
 
-      [src]% mvn -P hello eclipse:eclipse
+    [src] mvn -P hello eclipse:eclipse
    
 #. In eclipse import the new hello module and refresh all modules.
 #. In the ``web-app`` module run the ``Start.java`` main class to start 

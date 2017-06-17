@@ -1,10 +1,11 @@
-/* (c) 2014 - 2015 Open Source Geospatial Foundation - all rights reserved
+/* (c) 2014 - 2016 Open Source Geospatial Foundation - all rights reserved
  * (c) 2001 - 2014 OpenPlans
  * This code is licensed under the GPL 2.0 license, available at the root
  * application directory.
  */
 package org.geoserver.wms.capabilities;
 
+import static org.geoserver.ows.util.ResponseUtils.appendPath;
 import static org.geoserver.ows.util.ResponseUtils.appendQueryString;
 import static org.geoserver.ows.util.ResponseUtils.buildSchemaURL;
 import static org.geoserver.ows.util.ResponseUtils.buildURL;
@@ -50,6 +51,7 @@ import org.geoserver.catalog.PublishedType;
 import org.geoserver.catalog.ResourceInfo;
 import org.geoserver.catalog.StyleInfo;
 import org.geoserver.catalog.WMSLayerInfo;
+import org.geoserver.catalog.WorkspaceInfo;
 import org.geoserver.config.ContactInfo;
 import org.geoserver.config.GeoServer;
 import org.geoserver.config.ResourceErrorHandling;
@@ -82,8 +84,6 @@ import org.xml.sax.Attributes;
 import org.xml.sax.ContentHandler;
 import org.xml.sax.helpers.AttributesImpl;
 
-import sun.security.action.GetBooleanAction;
-
 import com.google.common.collect.Iterables;
 import com.vividsolutions.jts.geom.Envelope;
 import org.geoserver.wfs.json.JSONType;
@@ -98,8 +98,13 @@ import org.geoserver.wfs.json.JSONType;
  *      org.geoserver.platform.Operation)
  */
 public class GetCapabilitiesTransformer extends TransformerBase {
-    /** fixed MIME type for the returned capabilities document */
-    public static final String WMS_CAPS_MIME = "application/vnd.ogc.wms_xml";
+    /** default MIME type for the returned capabilities document */
+    public static final String WMS_CAPS_DEFAULT_MIME = "application/vnd.ogc.wms_xml";
+
+    // available MIME types for the returned capabilities document
+    public static final String[] WMS_CAPS_AVAIL_MIME = {
+            WMS_CAPS_DEFAULT_MIME, "text/xml"
+    };
 
     /** the WMS supported exception formats */
     static final String[] EXCEPTION_FORMATS = { "application/vnd.ogc.se_xml",
@@ -471,7 +476,11 @@ public class GetCapabilitiesTransformer extends TransformerBase {
             start("Request");
 
             start("GetCapabilities");
-            element("Format", WMS_CAPS_MIME);
+
+            // add all the supported MIME types for the capabilities document
+            for (String mimeType : WMS_CAPS_AVAIL_MIME) {
+                element("Format", mimeType);
+            }
 
             // build the service URL and make sure it ends with &
             String serviceUrl = buildURL(request.getBaseUrl(), "wms", params("SERVICE", "WMS"),
@@ -687,7 +696,7 @@ public class GetCapabilitiesTransformer extends TransformerBase {
             element("Abstract", serviceInfo.getAbstract());
 
             List<String> srsList = serviceInfo.getSRS();
-            Set<String> srs = new HashSet<String>();
+            Set<String> srs = new LinkedHashSet<String>();
             if (srsList != null) {
                 srs.addAll(srsList);
             }
@@ -747,7 +756,7 @@ public class GetCapabilitiesTransformer extends TransformerBase {
                 capabilitiesCrsIdentifiers.addAll(CRS.getSupportedCodes("EPSG"));
             } else {
                 comment("Limited list of EPSG projections:");
-                capabilitiesCrsIdentifiers = new TreeSet<String>(epsgCodes);
+                capabilitiesCrsIdentifiers = new LinkedHashSet<String>(epsgCodes);
             }
 
             try {
@@ -755,8 +764,11 @@ public class GetCapabilitiesTransformer extends TransformerBase {
                 String currentSRS;
 
                 while (it.hasNext()) {
-                    currentSRS = qualifySRS(it.next());
-                    element("SRS", currentSRS);
+                    String code = it.next();
+                    if(!"WGS84(DD)".equals(code)) {
+                        currentSRS = qualifySRS(code);
+                        element("SRS", currentSRS);
+                    }
                 }
             } catch (Exception e) {
                 LOGGER.log(Level.WARNING, e.getLocalizedMessage(), e);
@@ -794,20 +806,10 @@ public class GetCapabilitiesTransformer extends TransformerBase {
         }
 
         private boolean isExposable(LayerInfo layer) {
-            boolean wmsExposable = false;
-            if (layer.getType() == PublishedType.RASTER || layer.getType() == PublishedType.WMS) {
-                wmsExposable = true;
-            } else {
-                try {
-                    wmsExposable = layer.getType() == PublishedType.VECTOR
-                            && ((FeatureTypeInfo) layer.getResource()).getFeatureType()
-                                    .getGeometryDescriptor() != null;
-                } catch (Exception e) {
-                    LOGGER.log(Level.SEVERE, "An error occurred trying to determine if"
-                            + " the layer is geometryless", e);
-                }
+            if(!layer.isEnabled()) {
+                return false;
             }
-            return wmsExposable;   
+            return WMS.isWmsExposable(layer);   
         }
         
         /**
@@ -1075,7 +1077,10 @@ public class GetCapabilitiesTransformer extends TransformerBase {
                element("Abstract", "Layer-Group type layer: " + layerName);
            } else {
                element("Abstract", layerGroup.getAbstract());
-           }                
+           }
+           
+           // handle keywords
+           handleKeywordList(layerGroup.getKeywords());
 
            final ReferencedEnvelope layerGroupBounds = layerGroup.getBounds();
            final ReferencedEnvelope latLonBounds = layerGroupBounds.transform(
@@ -1126,7 +1131,10 @@ public class GetCapabilitiesTransformer extends TransformerBase {
            handleMetadataList(metadataLinks);
 
            // handle children layers and groups
-           if (!LayerGroupInfo.Mode.SINGLE.equals(layerGroup.getMode())) {
+           if(LayerGroupInfo.Mode.OPAQUE_CONTAINER.equals(layerGroup.getMode())) {
+               // just hide the layers in the group
+               layersAlreadyProcessed.addAll(layerGroup.layers());
+           } else if (!LayerGroupInfo.Mode.SINGLE.equals(layerGroup.getMode())) {
                for (PublishedInfo child : layerGroup.getLayers()) {
                    if (child instanceof LayerInfo) {
                        LayerInfo layer = (LayerInfo) child;
@@ -1145,6 +1153,7 @@ public class GetCapabilitiesTransformer extends TransformerBase {
            // the default ones for each layer
 
            handleScaleHint(layerGroup);
+
            end("Layer");
        }
        
@@ -1285,10 +1294,16 @@ public class GetCapabilitiesTransformer extends TransformerBase {
                 attrs.clear();
                 attrs.addAttribute("", "xmlns:xlink", "xmlns:xlink", "", XLINK_NS);
                 attrs.addAttribute(XLINK_NS, "type", "xlink:type", "", "simple");
-                
-                String legendUrl = buildURL(request.getBaseUrl(), legend.getOnlineResource(), null, URLType.RESOURCE);
+                WorkspaceInfo styleWs = sampleStyle.getWorkspace();
+                String legendUrl;
+                if ( styleWs != null){
+                    legendUrl = buildURL(request.getBaseUrl(),
+                            appendPath("styles", styleWs.getName(), legend.getOnlineResource()), null, URLType.RESOURCE);
+                } else {
+                    legendUrl = buildURL(request.getBaseUrl(),
+                            appendPath("styles", legend.getOnlineResource()), null, URLType.RESOURCE);
+                }
                 attrs.addAttribute(XLINK_NS, "href", "xlink:href", "", legendUrl);
-
                 element("OnlineResource", null, attrs);
 
                 end("LegendURL");

@@ -16,6 +16,7 @@ officially part of the GeoServer releases. They are however built along with the
    :maxdepth: 1
 
    authkey/index
+   oauth2/index
    dds/index
    scripting/index
    spatialite/index
@@ -35,6 +36,12 @@ officially part of the GeoServer releases. They are however built along with the
    geofence-server/index
    gdal/index
    gwc-s3/index
+   gwc-sqlite/index
    params-extractor/index
    remote-wps/index
-   ysld/index
+   jdbcstore/index
+   ncwms/index
+   backuprestore/index
+   onelogin/index
+   wmts-multidimensional/index
+   notification/index

@@ -6,6 +6,7 @@
 package org.geoserver.test;
 
 import static org.hamcrest.CoreMatchers.startsWith;
+import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertThat;
@@ -35,6 +36,10 @@ import java.util.Map;
 import java.util.logging.Level;
 
 import javax.imageio.ImageIO;
+import javax.imageio.ImageReader;
+import javax.imageio.metadata.IIOMetadata;
+import javax.imageio.metadata.IIOMetadataNode;
+import javax.imageio.stream.ImageInputStream;
 import javax.servlet.Filter;
 import javax.servlet.ServletContext;
 import javax.servlet.ServletException;
@@ -60,6 +65,8 @@ import org.apache.commons.codec.binary.Base64;
 import org.geoserver.catalog.CascadeDeleteVisitor;
 import org.geoserver.catalog.Catalog;
 import org.geoserver.catalog.FeatureTypeInfo;
+import org.geoserver.catalog.Keyword;
+import org.geoserver.catalog.KeywordInfo;
 import org.geoserver.catalog.LayerGroupInfo;
 import org.geoserver.catalog.LayerInfo;
 import org.geoserver.catalog.NamespaceInfo;
@@ -81,6 +88,7 @@ import org.geoserver.platform.ContextLoadedEvent;
 import org.geoserver.platform.GeoServerExtensions;
 import org.geoserver.platform.GeoServerExtensionsHelper;
 import org.geoserver.platform.GeoServerResourceLoader;
+import org.geoserver.platform.ServiceException;
 import org.geoserver.security.AccessMode;
 import org.geoserver.security.GeoServerRoleService;
 import org.geoserver.security.GeoServerRoleStore;
@@ -270,7 +278,7 @@ public class GeoServerSystemTestSupport extends GeoServerBaseTestSupport<SystemT
         if (applicationContext == null) {
             return;
         }
-
+        getGeoServer().dispose();
         try {
             //dispose WFS XSD schema's - they will otherwise keep geoserver instance alive forever!!
             disposeIfExists(getXSD11());
@@ -821,7 +829,7 @@ public class GeoServerSystemTestSupport extends GeoServerBaseTestSupport<SystemT
     protected void addLayerAccessRule(String workspace, String layer, AccessMode mode, String... roles) throws IOException {
         DataAccessRuleDAO dao = DataAccessRuleDAO.get();
         DataAccessRule rule = new DataAccessRule();
-        rule.setWorkspace(workspace);
+        rule.setRoot(workspace);
         rule.setLayer(layer);
         rule.setAccessMode(mode);
         rule.getRoles().addAll(Arrays.asList(roles));
@@ -941,6 +949,29 @@ public class GeoServerSystemTestSupport extends GeoServerBaseTestSupport<SystemT
         MockHttpServletResponse response = getAsServletResponse(path);
         return new ByteArrayInputStream( response.getContentAsString().getBytes() );
     }
+    /**
+     * Executes an ows request using the GET method.
+     *
+     * @param path The porition of the request after hte context, 
+     *      example: 'wms?request=GetMap&version=1.1.1&..."
+     * 
+     * @param responseCode Expected HTTP code, will provide exception if not matched
+     * @return An input stream which is the result of the request.
+     */
+    protected InputStream get( String path, int responseCode ) throws Exception {
+        MockHttpServletResponse response = getAsServletResponse(path);
+        int status = response.getStatus();
+        if( responseCode != status ){
+            String content = response.getContentAsString();
+            if( content == null || content.length() == 0 ){
+                throw new ServiceException("expected status <"+responseCode+"> but was <"+status+">");
+            }
+            else {
+                throw new ServiceException("expected status <"+responseCode+"> but was <"+status+">:"+content);
+            }
+        }
+        return new ByteArrayInputStream( response.getContentAsString().getBytes() );
+    }
     
     /**
      * Executes an ows request using the GET method.
@@ -1058,7 +1089,6 @@ public class GeoServerSystemTestSupport extends GeoServerBaseTestSupport<SystemT
         request.setMethod("PUT");
         request.setContentType(contentType);
         request.setContent(body);
-        request.addHeader("Content-type", contentType);
 
         return dispatch(request);
     }
@@ -1070,9 +1100,8 @@ public class GeoServerSystemTestSupport extends GeoServerBaseTestSupport<SystemT
      * </p>
      * @param path The porition of the request after the context ( no query string ), 
      *      example: 'wms'. 
-     * 
+     * @param xml The body content, often xml for OGC services
      * @return An input stream which is the result of the request.
-     * 
      */
     protected InputStream post( String path , String xml ) throws Exception {
         MockHttpServletResponse response = postAsServletResponse(path, xml);
@@ -1086,10 +1115,8 @@ public class GeoServerSystemTestSupport extends GeoServerBaseTestSupport<SystemT
      * @param path
      *            The porition of the request after the context ( no query
      *            string ), example: 'wms'.
-     * @param xml The body content.
-     * 
+     * @param xml The body content, often xml for OGC services
      * @return the servlet response
-     * 
      */
     protected MockHttpServletResponse postAsServletResponse(String path, String xml)
             throws Exception {
@@ -1142,12 +1169,19 @@ public class GeoServerSystemTestSupport extends GeoServerBaseTestSupport<SystemT
         return new ByteArrayInputStream(response.getContentAsString().getBytes());
     }
     
+    /**
+     * Executes an ows request using the POST method, with xml as body content.
+     * 
+     * @param path The porition of the request after the context ( no query string ), example: 'wms'.
+     * @param xml The body content, often xml for OGC services
+     * @param contentType
+     * @return the servlet response
+     */
     protected MockHttpServletResponse postAsServletResponse(String path, String body, String contentType) throws Exception {
         MockHttpServletRequest request = createRequest(path);
         request.setMethod("POST");
         request.setContentType(contentType);
         request.setContent(body.getBytes("UTF-8"));
-        request.addHeader("Content-type", contentType);
 
         return dispatch(request);
     }
@@ -1157,7 +1191,6 @@ public class GeoServerSystemTestSupport extends GeoServerBaseTestSupport<SystemT
         request.setMethod("POST");
         request.setContentType(contentType);
         request.setContent(body.getBytes("UTF-8"));
-        request.addHeader("Content-type", contentType);
         return dispatch(request, charset);
     }
 
@@ -1168,7 +1201,6 @@ public class GeoServerSystemTestSupport extends GeoServerBaseTestSupport<SystemT
         request.setMethod("POST");
         request.setContentType(contentType);
         request.setContent(body);
-        request.addHeader("Content-type", contentType);
 
         return dispatch(request);
     }
@@ -1204,6 +1236,23 @@ public class GeoServerSystemTestSupport extends GeoServerBaseTestSupport<SystemT
 
     /**
      * Executes an ows request using the GET method and returns the result as an 
+     * xml document.
+     * 
+     * @param path The portion of the request after the context, 
+     *      example: 'wms?request=GetMap&version=1.1.1&..."
+     * @param statusCode Expected status code
+     * 
+     * @return A result of the request parsed into a dom.
+     */
+    protected Document getAsDOM(final String path, int statusCode)
+            throws Exception {
+        InputStream responseContent = get(path,statusCode);
+        return dom(responseContent, true);
+    }
+    
+    
+    /**
+     * Executes an ows request using the GET method and returns the result as an 
      * xml document, with the ability to override the XML document encoding. 
      * 
      * @param path The portion of the request after the context, 
@@ -1216,6 +1265,49 @@ public class GeoServerSystemTestSupport extends GeoServerBaseTestSupport<SystemT
     protected Document getAsDOM(final String path, String encoding) throws Exception {
         return getAsDOM(path, true, encoding);
     }
+    
+    /**
+     * Executes an ows request using the GET method and returns the result as an 
+     * JSON document.
+     * 
+     * @param path The portion of the request after the context, 
+     *      example: 'wms?request=GetMap&version=1.1.1&..."
+     * @param statusCode Expected status code
+     * 
+     * @return A result of the request parsed into a dom.
+     */
+    protected JSON getAsJSON(final String path, int statusCode)
+            throws Exception {
+        MockHttpServletResponse response = getAsServletResponse(path, statusCode);
+        int status = response.getStatus();
+        if( statusCode != status ){
+            String content = response.getContentAsString();
+            if( content == null || content.length() == 0 ){
+                throw new ServiceException("expected status <"+statusCode+"> but was <"+status+">");
+            }
+            else {
+                throw new ServiceException("expected status <"+statusCode+"> but was <"+status+">:"+content);
+            }
+        }
+        return json(response);
+    }
+    
+    
+    private MockHttpServletResponse getAsServletResponse(String path, int statusCode) throws Exception {
+        MockHttpServletResponse response = getAsServletResponse(path);
+        int status = response.getStatus();
+        if( statusCode != status ){
+            String content = response.getContentAsString();
+            if( content == null || content.length() == 0 ){
+                throw new ServiceException("expected status <"+statusCode+"> but was <"+status+">");
+            }
+            else {
+                throw new ServiceException("expected status <"+statusCode+"> but was <"+status+">:"+content);
+            }
+        }
+        return response;
+    }
+
     /**
      * Executes a request using the GET method and parses the result as a json object.
      * 
@@ -1245,6 +1337,27 @@ public class GeoServerSystemTestSupport extends GeoServerBaseTestSupport<SystemT
         InputStream is = getBinaryInputStream(resp);
         return ImageIO.read(is);
     }
+    
+    /**
+     * Retrieves the request result as a list of BufferedImages from an animated format (works with GIF,
+     * other formats are not tested so far).
+     */
+    protected List<BufferedImage> getAsAnimation(String path, String mime) throws Exception {
+        MockHttpServletResponse resp = getAsServletResponse(path);
+
+        assertEquals(mime, resp.getContentType());
+        try (ImageInputStream is = ImageIO.createImageInputStream(getBinaryInputStream(resp))) {
+            ImageReader reader = ImageIO.getImageReaders(is).next();
+            reader.setInput(is);
+
+            final int numImages = reader.getNumImages(true);
+            List<BufferedImage> result = new ArrayList<>(numImages);
+            for (int i = 0; i < numImages; i++) {
+                result.add(reader.read(i));
+            }
+            return result;
+        }
+    }
 
     /**
      * Executes an ows request using the GET method and returns the result as an xml document.
@@ -1261,7 +1374,8 @@ public class GeoServerSystemTestSupport extends GeoServerBaseTestSupport<SystemT
      */
     protected Document getAsDOM(final String path, final boolean skipDTD)
     throws Exception {
-        return dom(get(path), skipDTD);
+        InputStream responseContent = get(path);
+        return dom(responseContent, skipDTD);
     }
 
     /**
@@ -1874,7 +1988,7 @@ public class GeoServerSystemTestSupport extends GeoServerBaseTestSupport<SystemT
         return caseInsensitiveKvp(input);
     }
 
-    protected Map caseInsensitiveKvp(HashMap input) {
+    protected Map caseInsensitiveKvp(Map input) {
         // make it case insensitive like the servlet+dispatcher maps
         Map result = new HashMap();
         for (Iterator it = input.keySet().iterator(); it.hasNext();) {
@@ -1907,13 +2021,6 @@ public class GeoServerSystemTestSupport extends GeoServerBaseTestSupport<SystemT
             myBody = body;
         }
         
-//        @Override
-//        public void setBodyContent(String body) {
-//            myBody = body.getBytes();
-//        }
-        
-        
-        
         @Override
         public BufferedReader getReader() {
             if (null == myBody)
@@ -1923,6 +2030,11 @@ public class GeoServerSystemTestSupport extends GeoServerBaseTestSupport<SystemT
         
         public ServletInputStream getInputStream() {
             return new GeoServerDelegatingServletInputStream(myBody);
+        }
+        
+        @Override
+        public String toString() {
+            return "GeoServerMockHttpServletRequest "+getMethod()+ " "+getRequestURI();
         }
     }
 
@@ -1946,7 +2058,12 @@ public class GeoServerSystemTestSupport extends GeoServerBaseTestSupport<SystemT
         }
         
         public void reset() {
-            if (myMark < 0 || myMark >= myBody.length){
+            
+            if (myBody==null ||myMark < 0 || myMark >= myBody.length){
+                if(myBody==null || myBody.length==0) {
+                    //This prevents an annoying error when the sting is empty or null
+                    return;
+                }
                 throw new IllegalStateException("Can't reset when no mark was set.");
             }
             
@@ -1968,7 +2085,7 @@ public class GeoServerSystemTestSupport extends GeoServerBaseTestSupport<SystemT
             int realOffset = offset + myOffset;
             int i;
 
-            if ( realOffset >= myBody.length ) {
+            if (myBody==null || realOffset >= myBody.length ) {
                 return -1;
             }
             for (i = 0; (i < length) && (i + myOffset < myBody.length); i++){
@@ -1993,5 +2110,32 @@ public class GeoServerSystemTestSupport extends GeoServerBaseTestSupport<SystemT
 
             return i;
         }
+    }
+
+    /**
+     * Helper method that adds some tests keywords to a layer group.
+     * The provided layer group name should not be NULL, if the layer
+     * group cannot be found an exception will be throw.
+     */
+    protected void addKeywordsToLayerGroup(String layerGroupName) {
+        // create a list of keywords
+        List<KeywordInfo> keywords = new ArrayList<>();
+        Keyword keyword1 = new Keyword("keyword1");
+        keyword1.setLanguage("en");
+        keyword1.setVocabulary("vocabulary1");
+        keywords.add(keyword1);
+        Keyword keyword2 = new Keyword("keyword2");
+        keyword2.setLanguage("pt");
+        keyword2.setVocabulary("vocabulary2");
+        keywords.add(keyword2);
+        // add keywords to a layer group
+        LayerGroupInfo layerGroup = getCatalog().getLayerGroupByName(layerGroupName);
+        if (layerGroup == null) {
+            // targeted layer group doesn't exists
+            throw new RuntimeException(String.format(
+                    "Layer group '%s' doesn't exists.", layerGroupName));
+        }
+        layerGroup.getKeywords().addAll(keywords);
+        getCatalog().save(layerGroup);
     }
 }

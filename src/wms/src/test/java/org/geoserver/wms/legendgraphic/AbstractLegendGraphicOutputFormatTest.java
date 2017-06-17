@@ -1,4 +1,4 @@
-/* (c) 2014 Open Source Geospatial Foundation - all rights reserved
+/* (c) 2014 - 2016 Open Source Geospatial Foundation - all rights reserved
  * (c) 2001 - 2013 OpenPlans
  * This code is licensed under the GPL 2.0 license, available at the root
  * application directory.
@@ -83,46 +83,7 @@ import com.vividsolutions.jts.geom.GeometryFactory;
  * @author Gabriel Roldan
  * @version $Id$
  */
-public class AbstractLegendGraphicOutputFormatTest extends WMSTestSupport {
-
-    private static final Logger LOGGER = Logging
-            .getLogger(AbstractLegendGraphicOutputFormatTest.class);
-
-    private BufferedImageLegendGraphicBuilder legendProducer;
-
-    GetLegendGraphic service;
-
-    
-    @Override
-    protected void onSetUp(SystemTestData testData) throws Exception {
-        super.onSetUp(testData);
-        Catalog catalog = getCatalog();           
-        testData.addRasterLayer(new QName("http://www.geo-solutions.it", "world", "gs")
-            , "world.tiff", "tiff", new HashMap(), MockData.class,catalog);
-        testData.addStyle("rainfall",MockData.class,catalog);
-        testData.addStyle("rainfall_ramp",MockData.class,catalog);
-        testData.addStyle("rainfall_classes",MockData.class,catalog);
-        //add raster layer for rendering transform test                
-        testData.addRasterLayer(new QName("http://www.opengis.net/wcs/1.1.1", "DEM", "wcs"), 
-        		"tazdem.tiff", "tiff", new HashMap(), MockData.class, catalog);	        
-    }
-    
-    @Before
-    public void setLegendProducer() throws Exception {
-        this.legendProducer = new BufferedImageLegendGraphicBuilder() {
-            public String getContentType() {
-                return "image/png";
-            }
-
-        };
-
-        service = new GetLegendGraphic(getWMS());
-    }
-
-    @After 
-    public void resetLegendProducer() throws Exception {
-        this.legendProducer = null;
-    }
+public class AbstractLegendGraphicOutputFormatTest extends BaseLegendTest{
 
     /**
      * Tests that a legend is produced for the explicitly specified rule, when the FeatureTypeStyle
@@ -1011,6 +972,102 @@ public class AbstractLegendGraphicOutputFormatTest extends WMSTestSupport {
             }
         }
     }
+    
+    /**
+     * Tests labelMargin legend option
+     */
+    @org.junit.Test
+    public void testLabelMargin() throws Exception {              
+        GetLegendGraphicRequest req = new GetLegendGraphicRequest();
+
+        FeatureTypeInfo ftInfo = getCatalog().getFeatureTypeByName(
+                MockData.POINTS.getNamespaceURI(), MockData.POINTS.getLocalPart());
+        req.setLayer(ftInfo.getFeatureType());
+        Style externalGraphicStyle = readSLD("ExternalGraphicDemo.sld");
+        req.setStyle(externalGraphicStyle);
+
+        final int HEIGHT_HINT = 20;
+        req.setHeight(HEIGHT_HINT);
+        
+        HashMap legendOptions = new HashMap();
+        legendOptions.put("labelMargin", "10");
+        req.setLegendOptions(legendOptions);
+        
+        this.legendProducer.buildLegendGraphic(req);
+
+        BufferedImage image = this.legendProducer.buildLegendGraphic(req);
+        assertEquals(HEIGHT_HINT * 2, image.getHeight());
+        for(int x = 21; x <= 29; x++) {
+            assertPixel(image, x, HEIGHT_HINT/2, new Color(255, 255, 255));
+        }
+        
+        legendOptions.put("labelMargin", "20");
+        req.setLegendOptions(legendOptions);
+        
+        this.legendProducer.buildLegendGraphic(req);
+
+        image = this.legendProducer.buildLegendGraphic(req);
+        assertEquals(HEIGHT_HINT * 2, image.getHeight());
+        for(int x = 21; x <= 39; x++) {
+            assertPixel(image, x, HEIGHT_HINT/2, new Color(255, 255, 255));
+        }
+    }
+    
+    /**
+     * Tests labelMargin legend option
+     */
+    @org.junit.Test
+    public void testAbsoluteMargins() throws Exception {              
+        Style style = readSLD("ColorMapWithLongLabels.sld");
+        assertNotNull(style.featureTypeStyles());
+        assertEquals(1, style.featureTypeStyles().size());
+        FeatureTypeStyle fts = style.featureTypeStyles().get(0);
+        assertNotNull(fts.rules());
+        assertEquals(1, fts.rules().size());
+        Rule rule = fts.rules().get(0);
+        assertNotNull(rule.symbolizers());
+        assertEquals(1, rule.symbolizers().size());
+        assertTrue(rule.symbolizers().get(0) instanceof RasterSymbolizer);
+        RasterSymbolizer symbolizer = (RasterSymbolizer)rule.symbolizers().get(0);
+        assertNotNull(symbolizer.getColorMap());
+        assertEquals(3, symbolizer.getColorMap().getColorMapEntries().length);
+        
+        GetLegendGraphicRequest req = new GetLegendGraphicRequest();
+        CoverageInfo cInfo = getCatalog().getCoverageByName("world");
+        assertNotNull(cInfo);
+
+        GridCoverage coverage = cInfo.getGridCoverage(null, null);
+        try {
+            SimpleFeatureCollection feature;
+            feature = FeatureUtilities.wrapGridCoverage((GridCoverage2D) coverage);
+            req.setLayer(feature.getSchema());
+            req.setStyle(style);
+            HashMap legendOptions = new HashMap();
+            legendOptions.put("dx", "0.5");
+            legendOptions.put("dy", "0");
+            req.setLegendOptions(legendOptions);
+            
+            final int HEIGHT_HINT = 30;
+            req.setHeight(HEIGHT_HINT);
+            
+            // use default values for the rest of parameters
+            this.legendProducer.buildLegendGraphic(req);
+
+            BufferedImage image = this.legendProducer.buildLegendGraphic(req);
+            int absoluteWidth = image.getWidth();
+            legendOptions.put("absoluteMargins", "false");
+            image = this.legendProducer.buildLegendGraphic(req);
+            assertTrue(image.getWidth() > absoluteWidth);
+        } finally {
+            RenderedImage ri = coverage.getRenderedImage();
+            if(coverage instanceof GridCoverage2D) {
+                ((GridCoverage2D) coverage).dispose(true);
+            }
+            if(ri instanceof PlanarImage) {
+                ImageUtilities.disposePlanarImageChain((PlanarImage) ri);
+            }
+        }
+    }
 
     /**
      * @param sldName
@@ -1027,26 +1084,4 @@ public class AbstractLegendGraphicOutputFormatTest extends WMSTestSupport {
         return style;
     }
     
-    private int getTitleHeight(GetLegendGraphicRequest req) {    
-        final BufferedImage image = ImageUtils.createImage(req.getWidth(),
-                req.getHeight(), (IndexColorModel) null, req.isTransparent());
-        return getRenderedLabel(image, "TESTTITLE", req).getHeight();
-    }
-    
-    private BufferedImage getRenderedLabel(BufferedImage image, String label,
-            GetLegendGraphicRequest request) {
-        Font labelFont = LegendUtils.getLabelFont(request);
-        boolean useAA = LegendUtils.isFontAntiAliasing(request);
-    
-        final Graphics2D graphics = image.createGraphics();
-        graphics.setFont(labelFont);
-        if (useAA) {
-            graphics.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
-                    RenderingHints.VALUE_ANTIALIAS_ON);
-        } else {
-            graphics.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
-                    RenderingHints.VALUE_ANTIALIAS_OFF);
-        }
-        return LegendUtils.renderLabel(label, graphics, request);
-    }
 }

@@ -82,11 +82,11 @@
     </bean>
     
     <bean id="wmsGetFeatureInfoGML3" class="org.geoserver.wms.featureinfo.GML3FeatureInfoOutputFormat">
-      <constructor-arg ref="wms" />
+      <constructor-arg ref="gml3OutputFormat" />
     </bean>
 
     <bean id="wmsGetFeatureInfoXML311" class="org.geoserver.wms.featureinfo.XML311FeatureInfoOutputFormat">
-      <constructor-arg ref="wms" />
+      <constructor-arg ref="gml3OutputFormat" />
     </bean>
     
     <bean id="wmsGetFeatureInfoHTML" class="org.geoserver.wms.featureinfo.HTMLFeatureInfoOutputFormat">
@@ -280,6 +280,7 @@
     </bean>
  	<bean id="startIndexKvpParser" class="org.geoserver.ows.kvp.IntegerKvpParser">
  	    <constructor-arg value="startIndex"/>
+ 	    <property name="service" value="WMS"/>
  	</bean>
  	<bean id="angleKvpParser" class="org.geoserver.ows.kvp.DoubleKvpParser">
 		<constructor-arg value="angle"/>
@@ -575,6 +576,30 @@
     <bean id="JPEGMapResponse" class="org.geoserver.wms.map.JPEGMapResponse">
       <constructor-arg ref="wms" />
     </bean>
+    
+    <bean id="JpegPngMapProducer" class="org.geoserver.wms.map.RenderedImageMapOutputFormat">
+      <constructor-arg>
+        <description>The prescribed output format MIME-Type, same as declared in the getcaps document</description>
+        <value>image/vnd.jpeg-png</value>
+     </constructor-arg>
+      <constructor-arg ref="wms" />
+      <property name="transparencySupported">
+        <description>JPEG-PNG does support transparency</description>
+        <value>true</value>
+      </property>
+      <property name="paletteSupported">
+        <description>JPEG-PNG does support 8-bit indexed color maps</description>
+        <value>true</value>
+      </property>
+      <!-- The extension is actually dynamically determined -->
+      <property name="extension" value="jpg-png"/>
+    </bean>
+    
+    <bean id="JpegPngMapResponse" class="org.geoserver.wms.map.JpegPngMapResponse">
+        <constructor-arg index="0" ref="wms"/>
+        <constructor-arg index="1" ref="JPEGMapResponse"/>
+        <constructor-arg index="2" ref="PNGMapResponse"/>
+    </bean>
 
     <bean id="PDFMapProducer" class="org.geoserver.wms.map.PDFMapOutputFormat">
     </bean>
@@ -710,6 +735,7 @@
   </bean>
   <bean id="wmsLayerIdentifier" class="org.geoserver.wms.featureinfo.WMSLayerIdentifier">
       <constructor-arg ref="entityResolverProvider" />
+      <constructor-arg ref="wms" />
   </bean>
     
     

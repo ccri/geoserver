@@ -7,6 +7,7 @@ package org.geoserver.wms.map;
 
 import it.geosolutions.jaiext.lookup.LookupTable;
 import it.geosolutions.jaiext.lookup.LookupTableFactory;
+import it.geosolutions.jaiext.range.Range;
 
 import java.awt.Color;
 import java.awt.Graphics2D;
@@ -44,6 +45,7 @@ import javax.media.jai.ROIShape;
 import javax.media.jai.operator.ConstantDescriptor;
 import javax.media.jai.operator.MosaicDescriptor;
 
+import org.geoserver.catalog.LayerInfo;
 import org.geoserver.platform.GeoServerResourceLoader;
 import org.geoserver.platform.ServiceException;
 import org.geoserver.platform.resource.Resource;
@@ -69,12 +71,15 @@ import org.geotools.coverage.grid.GridGeometry2D;
 import org.geotools.coverage.grid.io.AbstractGridFormat;
 import org.geotools.coverage.grid.io.GridCoverage2DReader;
 import org.geotools.data.Query;
+import org.geotools.data.simple.SimpleFeatureCollection;
 import org.geotools.gce.imagemosaic.ImageMosaicFormat;
 import org.geotools.geometry.jts.ReferencedEnvelope;
 import org.geotools.image.ImageWorker;
 import org.geotools.map.Layer;
 import org.geotools.map.StyleLayer;
 import org.geotools.parameter.Parameter;
+import org.geotools.process.Processors;
+import org.geotools.process.function.ProcessFunction;
 import org.geotools.referencing.CRS;
 import org.geotools.referencing.CRS.AxisOrder;
 import org.geotools.referencing.crs.DefaultGeographicCRS;
@@ -82,20 +87,25 @@ import org.geotools.referencing.operation.transform.AffineTransform2D;
 import org.geotools.renderer.lite.RendererUtilities;
 import org.geotools.renderer.lite.RenderingTransformationHelper;
 import org.geotools.renderer.lite.StreamingRenderer;
+import org.geotools.renderer.lite.gridcoverage2d.ChannelSelectionUpdateStyleVisitor;
 import org.geotools.renderer.lite.gridcoverage2d.GridCoverageRenderer;
 import org.geotools.resources.image.ColorUtilities;
 import org.geotools.styling.RasterSymbolizer;
 import org.geotools.styling.Style;
 import org.geotools.util.logging.Logging;
+import org.opengis.coverage.grid.Format;
 import org.opengis.feature.Feature;
 import org.opengis.feature.type.FeatureType;
+import org.opengis.feature.type.Name;
 import org.opengis.filter.expression.Expression;
 import org.opengis.geometry.BoundingBox;
+import org.opengis.parameter.GeneralParameterDescriptor;
 import org.opengis.parameter.GeneralParameterValue;
+import org.opengis.parameter.ParameterDescriptorGroup;
+import org.opengis.parameter.ParameterValueGroup;
 import org.opengis.referencing.FactoryException;
 import org.opengis.referencing.crs.CoordinateReferenceSystem;
 import org.opengis.referencing.datum.PixelInCell;
-
 
 /**
  * A {@link GetMapOutputFormat} that produces {@link RenderedImageMap} instances to be encoded in
@@ -129,7 +139,14 @@ import org.opengis.referencing.datum.PixelInCell;
  * @see JPEGMapResponse
  */
 public class RenderedImageMapOutputFormat extends AbstractMapOutputFormat {
-    
+
+    /** An object keeping track of the reader and related params used to perform the rendering */
+    static class ReadingContext {
+
+        GridCoverage2DReader reader;
+        Object params;
+    }
+
     private final static Interpolation NN_INTERPOLATION = new InterpolationNearest();
 
     private final static Interpolation BIL_INTERPOLATION = new InterpolationBilinear();
@@ -167,7 +184,7 @@ public class RenderedImageMapOutputFormat extends AbstractMapOutputFormat {
     }
 
     /** A logger for this class. */
-    private static final Logger LOGGER = Logging.getLogger(RenderedImageMapOutputFormat.class);
+    public static final Logger LOGGER = Logging.getLogger(RenderedImageMapOutputFormat.class);
 
     /** Which format to encode the image in if one is not supplied */
     private static final String DEFAULT_MAP_FORMAT = "image/png";
@@ -482,21 +499,31 @@ public class RenderedImageMapOutputFormat extends AbstractMapOutputFormat {
                 }
             }
         }
-        
-        if(request.getInterpolations() != null && !request.getInterpolations().isEmpty()) {
-            int count = 0;
-            List<Interpolation> interpolations = request.getInterpolations();
-            for(Layer layer : mapContent.layers()) {
-                if(count < interpolations.size()) {
-                    Interpolation interpolation = interpolations.get(count);
-                    if(interpolation != null) {
-                        layer.getUserData().put(StreamingRenderer.BYLAYER_INTERPOLATION, interpolation);
-                    }
+
+        for (int i = 0; i < request.getLayers().size(); i++) {
+
+            Interpolation interpolationToSet = null;
+            // check interpolations vendor parameter first
+            if (request.getInterpolations() != null && request.getInterpolations().size() > i) {
+                interpolationToSet = request.getInterpolations().get(i);
+            }
+            // if vendor param not set, check by layer interpolation configuration
+            if (interpolationToSet == null) {
+                LayerInfo layerInfo = request.getLayers().get(i).getLayerInfo();
+
+                LayerInfo.WMSInterpolation byLayerInterpolation = getConfiguredLayerInterpolation(layerInfo);
+                if (byLayerInterpolation != null) {
+                    interpolationToSet = toInterpolationObject(byLayerInterpolation);
                 }
-                count++;
+            }
+
+            if (interpolationToSet != null) {
+                Layer layer = mapContent.layers().get(i);
+                layer.getUserData().put(StreamingRenderer.BYLAYER_INTERPOLATION,
+                        interpolationToSet);
             }
         }
-        
+
         renderer.setRendererHints(rendererParams);
 
         // if abort already requested bail out
@@ -517,17 +544,7 @@ public class RenderedImageMapOutputFormat extends AbstractMapOutputFormat {
         
         onBeforeRender(renderer);
         
-        int localMaxRenderingTime = 0;
-        Object timeoutOption = request.getFormatOptions().get("timeout");
-        if (timeoutOption != null) {
-            try {
-                localMaxRenderingTime = Integer.parseInt(timeoutOption.toString());
-            } catch (NumberFormatException e) {
-                LOGGER.log(Level.WARNING,"Could not parse format_option \"timeout\": "+timeoutOption, e);
-            }
-        }
-        int maxRenderingTime = getMaxRenderingTime(localMaxRenderingTime);
-        
+        int maxRenderingTime = wms.getMaxRenderingTime(request);
         ServiceException serviceException = null;
         boolean saveMap = (request.getRawKvp() != null && WMSServiceExceptionHandler
                 .isPartialMapExceptionType(request.getRawKvp().get("EXCEPTIONS")));
@@ -634,25 +651,7 @@ public class RenderedImageMapOutputFormat extends AbstractMapOutputFormat {
                 preparedImage, hintsMap);
     }
     
-    /**
-     * Timeout on the smallest nonzero value of the WMS timeout and the timeout format option
-     * If both are zero then there is no timeout
-     * 
-     * @param localMaxRenderingTime
-     *
-     */
-    public int getMaxRenderingTime(int localMaxRenderingTime) {
-        
-        int maxRenderingTime = wms.getMaxRenderingTime() * 1000;
-        
-        if (maxRenderingTime == 0) {
-            maxRenderingTime = localMaxRenderingTime;
-        } else if (localMaxRenderingTime != 0) {
-            maxRenderingTime = Math.min(maxRenderingTime, localMaxRenderingTime);
-        }
-        
-        return maxRenderingTime;
-    }
+    
 
     /**
      * Allows subclasses to customize the renderer before the paint method gets invoked
@@ -887,6 +886,11 @@ public class RenderedImageMapOutputFormat extends AbstractMapOutputFormat {
         RasterSymbolizer symbolizer = symbolizers.get(0);
         Expression transformation = visitor.getRasterRenderingTransformation();
 
+        // direct raster rendering uses Query.ALL for the style query which is
+        // inefficient for vector sources
+        if (isVectorSource(transformation)){
+            return null;
+        }
         //
         // Dimensions
         //
@@ -911,29 +915,38 @@ public class RenderedImageMapOutputFormat extends AbstractMapOutputFormat {
         } else {
             bgColor = new Color(bgColor.getRed(), bgColor.getGreen(), bgColor.getBlue(), 255);
         }
-  
+
         //
         // Grab the interpolation
         //
         final Interpolation interpolation;
-        if(layerInterpolation != null) {
+        if (layerInterpolation != null) {
             interpolation = layerInterpolation;
         } else {
-            if (wms != null) {
-                if (WMSInterpolation.Nearest.equals(wms.getInterpolation())) {
-                    interpolation = Interpolation.getInstance(Interpolation.INTERP_NEAREST);
-                } else if (WMSInterpolation.Bilinear.equals(wms.getInterpolation())) {
-                    interpolation = Interpolation.getInstance(Interpolation.INTERP_BILINEAR);
-                } else if (WMSInterpolation.Bicubic.equals(wms.getInterpolation())) {
-                    interpolation = Interpolation.getInstance(Interpolation.INTERP_BICUBIC);
-                } else {
-                    interpolation = Interpolation.getInstance(Interpolation.INTERP_NEAREST);
-                }
+            LayerInfo.WMSInterpolation byLayerInterpolation = null;
+            if (mapContent.getRequest().getLayers().size() > layerIndex)
+            {
+                LayerInfo layerInfo = mapContent.getRequest().getLayers().get(layerIndex)
+                        .getLayerInfo();
+                byLayerInterpolation = getConfiguredLayerInterpolation(layerInfo);
+            }
+
+            WMSInfo.WMSInterpolation byServiceInterpolation = null;
+            if (byLayerInterpolation == null && wms != null) {
+                // if interpolation method is not configured for this layer, use service default
+                byServiceInterpolation = wms.getInterpolation();
+            }
+
+            if (byLayerInterpolation != null) {
+                interpolation = toInterpolationObject(byLayerInterpolation);
+            } else if (byServiceInterpolation != null) {
+                interpolation = toInterpolationObject(byServiceInterpolation);
             } else {
+                // default to Nearest Neighbor
                 interpolation = Interpolation.getInstance(Interpolation.INTERP_NEAREST);
             }
         }
-      
+
         // 
         // Tiling
         //
@@ -947,7 +960,14 @@ public class RenderedImageMapOutputFormat extends AbstractMapOutputFormat {
             tileSizeY = mapContent.getMapHeight();
         }
         
+        // 
+        // Band selection
+        //
+        final int[] bandIndices = 
+                ChannelSelectionUpdateStyleVisitor.getBandIndicesFromSelectionChannels(symbolizer);
+        
         // actual read
+        final ReadingContext context = new ReadingContext();
         RenderedImage image = null;
         GridCoverage2D coverage=null; 
         RenderingHints interpolationHints = new RenderingHints(JAI.KEY_INTERPOLATION, interpolation);
@@ -966,7 +986,7 @@ public class RenderedImageMapOutputFormat extends AbstractMapOutputFormat {
                 // handling
                 final Object params = feature.getProperty("params").getValue();
                 GeneralParameterValue[] readParameters = getReadParameters(params, null, null,
-                        interpolation, readerBgColor);
+                        interpolation, readerBgColor, bandIndices);
                 final GridCoverageRenderer gcr = new GridCoverageRenderer(mapEnvelope.getCoordinateReferenceSystem(), mapEnvelope,
                         mapRasterArea, worldToScreen, interpolationHints);
                 gcr.setAdvancedProjectionHandlingEnabled(true);
@@ -1026,19 +1046,20 @@ public class RenderedImageMapOutputFormat extends AbstractMapOutputFormat {
 
                         protected GridCoverage2D readCoverage(GridCoverage2DReader reader,
                                 Object params, GridGeometry2D readGG) throws IOException {
-                            return readBestCoverage(reader, params,
-                                    ReferencedEnvelope.reference(readGG.getEnvelope()),
-                                    readGG.getGridRange2D(), interpolation, readerBgColor);
+                            context.reader = reader;
+                            context.params = params;
+                            return readBestCoverage(context, ReferencedEnvelope.reference(readGG.getEnvelope()),
+                                    readGG.getGridRange2D(), interpolation, readerBgColor, bandIndices);
                         }
-
                     };
-                    
+
                     Object result = helper.applyRenderingTransformation(transformation, layer.getFeatureSource(), 
                             layer.getQuery(), Query.ALL, readGG, coverageCRS, interpolationHints);
                     if(result == null) {
                         coverage = null;
                     } else if(result instanceof GridCoverage2D) {
                         coverage = (GridCoverage2D) result;
+                        symbolizer = updateSymbolizerForBandSelection(context, symbolizer, bandIndices);
                     } else {
                         // we don't know how to handle this case, we'll let streaming renderer fall back on this one
                         return null;
@@ -1054,10 +1075,13 @@ public class RenderedImageMapOutputFormat extends AbstractMapOutputFormat {
                     // render via grid coverage renderer, that will apply the advanced projection
                     // handling
                     final Object params = feature.getProperty("params").getValue();
-
-                    coverage = readBestCoverage(reader, params,
+                    context.reader = reader;
+                    context.params = params;
+                    coverage = readBestCoverage(context,
                             ReferencedEnvelope.reference(readGG.getEnvelope()),
-                            readGG.getGridRange2D(), interpolation, readerBgColor);
+                            readGG.getGridRange2D(), interpolation, readerBgColor, bandIndices);
+
+                    symbolizer = updateSymbolizerForBandSelection(context, symbolizer, bandIndices);
                 }
                 // Nothing found, we return a constant image with background value
                 if (coverage == null) {
@@ -1089,6 +1113,14 @@ public class RenderedImageMapOutputFormat extends AbstractMapOutputFormat {
             return null;
         }
         
+        // check if the image intersects the requested area at all return null and be done with it
+        final Rectangle imageBounds = PlanarImage.wrapRenderedImage(image).getBounds();
+        Rectangle intersection = imageBounds.intersection(mapRasterArea);
+        if(intersection.isEmpty()) {
+            return null;
+        }
+
+        
         ////
         //
         // Final Touch 
@@ -1100,7 +1132,6 @@ public class RenderedImageMapOutputFormat extends AbstractMapOutputFormat {
         // since it does not support changing the bkg color.
         //
         ////        
-        final Rectangle imageBounds = PlanarImage.wrapRenderedImage(image).getBounds(); 
         
         // we need to do a mosaic, let's prepare a layout
         // prepare a final image layout should we need to perform a mosaic or a crop
@@ -1190,6 +1221,7 @@ public class RenderedImageMapOutputFormat extends AbstractMapOutputFormat {
         //
         
         // in case of component color model
+        boolean noDataTransparencyOnGrayByte = false;
         if (cm instanceof ComponentColorModel) {
 
             // convert to RGB if necessary
@@ -1216,10 +1248,17 @@ public class RenderedImageMapOutputFormat extends AbstractMapOutputFormat {
                     }
                 } else if(!hasAlpha) {
                     // no transparency in the original data, so no need to expand to RGB
-                    if(transparent) {
+                    if (transparent) {
                         // we need to expand the image with an alpha channel
-                        image = addAlphaChannel(image);
-                        bgValues = new double[] { mapToGrayColor(bgColor, ccm), 0 };
+                        // let's see if we can do that by directly mapping no data to transparent color
+                        RenderedImage transparentImage = grayNoDataTransparent(image);
+                        if (transparentImage == null) {
+                            image = addAlphaChannel(image);
+                            bgValues = new double[] { mapToGrayColor(bgColor, ccm), 0 };
+                        } else {
+                            image = transparentImage;
+                            noDataTransparencyOnGrayByte = true;
+                        }
                     } else {
                         bgValues = new double[] { mapToGrayColor(bgColor, ccm) };
                     }
@@ -1228,7 +1267,7 @@ public class RenderedImageMapOutputFormat extends AbstractMapOutputFormat {
                     final ImageWorker iw = new ImageWorker(image);
                     final RenderedImage alpha = iw.retainLastBand().getRenderedImage();
                     alphaChannels = new PlanarImage[] { PlanarImage.wrapRenderedImage(alpha) };
-                    
+
                     if (transparent) {
                         bgValues = new double[] { mapToGrayColor(bgColor, ccm), 0 };
                     } else {
@@ -1242,7 +1281,7 @@ public class RenderedImageMapOutputFormat extends AbstractMapOutputFormat {
                 hasAlpha = cm.hasAlpha();
             }
 
-            if(bgValues == null) {
+            if (bgValues == null && !noDataTransparencyOnGrayByte) {
                 if (hasAlpha) {
                     // get alpha
     	            final ImageWorker iw = new ImageWorker(image);
@@ -1276,28 +1315,16 @@ public class RenderedImageMapOutputFormat extends AbstractMapOutputFormat {
         
         //
         // If we need to add a collar use mosaic or if we need to blend/apply a bkg color
-        if(!(imageBounds.contains(mapRasterArea) || imageBounds.equals(mapRasterArea))||transparencyType!=Transparency.OPAQUE) {
-            Rectangle roi = imageBounds.intersection(mapRasterArea);
-            ROI[] rois = new ROI[] { new ROIShape(!roi.isEmpty() ? roi : mapRasterArea) };
-
-            // build the transparency thresholds
-            double[][] thresholds = new double[][] { { ColorUtilities.getThreshold(image
-                    .getSampleModel().getDataType()) } };
-            // apply the mosaic
-            ImageWorker w = new ImageWorker(image);
-            w.setRenderingHint(JAI.KEY_IMAGE_LAYOUT, layout);
-            w.setBackground(bgValues);
-            w.mosaic(new RenderedImage[] { image }, 
-                    alphaChannels != null && transparencyType==Transparency.TRANSLUCENT ? MosaicDescriptor.MOSAIC_TYPE_BLEND: MosaicDescriptor.MOSAIC_TYPE_OVERLAY, 
-                    alphaChannels, 
-                    rois, 
-                    thresholds, 
-                    null);
-            image = w.getRenderedImage();
+        ImageWorker iw = new ImageWorker(image);
+        Object roiCandidate = image.getProperty("roi");
+        if (!(imageBounds.contains(mapRasterArea) || imageBounds.equals(mapRasterArea)) 
+                || transparencyType != Transparency.OPAQUE
+                || iw.getNoData() != null || roiCandidate instanceof ROI) {
+            image = applyBackgroundTransparency(mapRasterArea, image, intersection, layout,
+                    bgValues, alphaChannels, transparencyType, iw, roiCandidate, noDataTransparencyOnGrayByte);
         } else {
             // Check if we need to crop a subset of the produced image, else return it right away
             if (imageBounds.contains(mapRasterArea) && !imageBounds.equals(mapRasterArea)) { // the produced image does not need a final mosaicking operation but a crop!
-                ImageWorker iw = new ImageWorker(image);
                 iw.setBackground(bgValues);
                 iw.crop(0, 0, mapWidth, mapHeight);
                 image = iw.getRenderedImage();
@@ -1305,6 +1332,85 @@ public class RenderedImageMapOutputFormat extends AbstractMapOutputFormat {
         }
         
         return image;
+    }
+
+    private RenderedImage applyBackgroundTransparency(final Rectangle mapRasterArea,
+            RenderedImage image, Rectangle intersection, final ImageLayout layout,
+            double[] bgValues, PlanarImage[] alphaChannels, final int transparencyType,
+            ImageWorker iw, Object roiCandidate, boolean preProcessedWithTransparency) {
+        ROI roi;
+        if (roiCandidate instanceof ROI) {
+            ROI imageROI = (ROI) roiCandidate;
+            try {
+                roi = imageROI.intersect(new ROIShape(mapRasterArea));
+            } catch(IllegalArgumentException e) {
+                // in the unlikely event that the ROI does not intersect the target map
+                // area an exception will be thrown. Catching the exception instead of checking
+                // every time a full intersects test is less expensive, a ROI based image
+                // will allocate the full ROI as a single byte[] and then scan it posing
+                // memory boundness concerns
+                if(LOGGER.isLoggable(Level.FINE)) {
+                    LOGGER.log(Level.FINE, "Failed to intersect image ROI with target bounds, returning empty result", e);
+                }
+                return null;
+            }
+        } else {
+            roi = new ROIShape(!intersection.isEmpty() ? intersection : mapRasterArea);
+        }
+        ROI[] rois = (!preProcessedWithTransparency) ? new ROI[] {roi} : null;
+
+        // build the transparency thresholds
+        double[][] thresholds = (!preProcessedWithTransparency) ? new double[][] { { ColorUtilities.getThreshold(image
+                .getSampleModel().getDataType()) } } : null;
+        // apply the mosaic
+        
+        iw.setRenderingHint(JAI.KEY_IMAGE_LAYOUT, layout);
+        iw.setBackground(bgValues);
+        iw.mosaic(new RenderedImage[] { image }, 
+                alphaChannels != null && transparencyType==Transparency.TRANSLUCENT ? MosaicDescriptor.MOSAIC_TYPE_BLEND: MosaicDescriptor.MOSAIC_TYPE_OVERLAY, 
+                alphaChannels, 
+                rois, 
+                thresholds, 
+                null);
+        image = iw.getRenderedImage();
+        return image;
+    }
+
+    private static boolean isVectorSource(Expression tranformation) {
+        // instanceof is sufficient for null check
+        if (tranformation instanceof ProcessFunction){
+            ProcessFunction processFunction = (ProcessFunction) tranformation;
+            Name processName = processFunction.getProcessName();
+            Map<String, org.geotools.data.Parameter<?>> params = Processors.getParameterInfo(processName);
+            for (org.geotools.data.Parameter<?> param : params.values()){
+                if (SimpleFeatureCollection.class.isAssignableFrom(param.getType())){
+                     return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private RasterSymbolizer updateSymbolizerForBandSelection(ReadingContext context,
+            RasterSymbolizer symbolizer, int[] bandIndices) {
+        GridCoverage2DReader reader = context != null ? context.reader : null;
+        Object params = context != null ? context.params : null;
+
+        if (params != null && reader != null && bandIndices != null) {
+            Format format = reader.getFormat();
+            ParameterValueGroup readParameters = null;
+            ParameterDescriptorGroup descriptorGroup = null;
+            List<GeneralParameterDescriptor> descriptors = null;
+            if (format != null && ((readParameters = format.getReadParameters()) != null)
+                    && ((descriptorGroup = readParameters.getDescriptor()) != null)
+                    && ((descriptors = descriptorGroup.descriptors()) != null)
+                    && (descriptors.contains(AbstractGridFormat.BANDS)) && bandIndices != null) {
+                // if bands are selected, alter the symbolizer to use bands in order 0,1,2,...
+                // since the channel order defined by it previously is taken care of the reader
+                symbolizer = GridCoverageRenderer.setupSymbolizerForBandsSelection(symbolizer);
+            }
+        }
+        return symbolizer;
     }
 
     private ReferencedEnvelope getEastNorthEnvelope(ReferencedEnvelope envelope)
@@ -1323,6 +1429,32 @@ public class RenderedImageMapOutputFormat extends AbstractMapOutputFormat {
         }
     }
 
+    /**
+     * Optmized method for Gray Scale Byte images to turn noData value to transparent.
+     * @param image
+     * @return
+     */
+    private RenderedImage grayNoDataTransparent(RenderedImage image) {
+        // Using an ImageWorker
+        ImageWorker iw =  new ImageWorker(image);
+        Range noData = iw.getNoData();
+        ColorModel cm = image.getColorModel();
+        final int numColorBands = cm.getNumColorComponents();
+        if (noData != null && image.getSampleModel().getDataType() == DataBuffer.TYPE_BYTE
+                && numColorBands == 1 && cm instanceof ComponentColorModel)
+        {
+            int minValue = noData.getMin().intValue();
+            int maxValue = noData.getMax().intValue();
+            if (minValue == maxValue && minValue >= Byte.MIN_VALUE && minValue <= Byte.MAX_VALUE) {
+                // Optimization on gray images with noData value. Make that value transparent
+                Color transparentColor = new Color(minValue, minValue, minValue);
+                iw.makeColorTransparent(transparentColor);
+                return iw.getRenderedImage();
+            }
+        }
+        return null;
+    }
+
     private RenderedImage addAlphaChannel(RenderedImage image) {
         final ImageLayout tempLayout= new ImageLayout(image);
         tempLayout.unsetValid(ImageLayout.COLOR_MODEL_MASK).unsetValid(ImageLayout.SAMPLE_MODEL_MASK);                    
@@ -1331,8 +1463,10 @@ public class RenderedImageMapOutputFormat extends AbstractMapOutputFormat {
                 Float.valueOf(image.getHeight()),
                 new Byte[] { Byte.valueOf((byte) 255) }, 
                 new RenderingHints(JAI.KEY_IMAGE_LAYOUT,tempLayout));
+
         // Using an ImageWorker
         ImageWorker iw =  new ImageWorker(image);
+
         // Adding Alpha band
         iw.addBand(alpha, false, true, null);
         return iw.getRenderedImage();
@@ -1395,13 +1529,15 @@ public class RenderedImageMapOutputFormat extends AbstractMapOutputFormat {
      * @throws IOException
      */
     private static GridCoverage2D readBestCoverage(
-            final GridCoverage2DReader reader, 
-            final Object params,
+            final ReadingContext context,
             final ReferencedEnvelope envelope,
             final Rectangle requestedRasterArea,
             final Interpolation interpolation,
-            final Color bgColor) throws IOException {
+            final Color bgColor,
+            final int[] bandIndices) throws IOException {
 
+        final GridCoverage2DReader reader = context.reader;
+        final Object params = context.params;
         ////
         //
         // Intersect the present envelope with the request envelope, also in WGS 84 to make sure
@@ -1431,16 +1567,16 @@ public class RenderedImageMapOutputFormat extends AbstractMapOutputFormat {
 
         GridCoverage2D coverage;
         GeneralParameterValue[] readParams = getReadParameters(params, envelope,
-                requestedRasterArea, interpolation, bgColor);
+                requestedRasterArea, interpolation, bgColor, bandIndices);
 
         coverage = reader.read(readParams);
-
+        context.params = readParams;
         return coverage;
     }
 
     private static GeneralParameterValue[] getReadParameters(final Object params,
             final ReferencedEnvelope envelope, final Rectangle requestedRasterArea,
-            final Interpolation interpolation, final Color bgColor) {
+            final Interpolation interpolation, final Color bgColor, int[] bandIndices) {
         Parameter<GridGeometry2D> readGG = null;
         if (envelope != null) {
             // //
@@ -1463,8 +1599,14 @@ public class RenderedImageMapOutputFormat extends AbstractMapOutputFormat {
         } else {
             bgColorParam = null;
         }
-        
-        
+
+        //Inject bandIndices read param
+        Parameter<int[]> bandIndicesParam = null;
+        if (bandIndices != null) {
+            bandIndicesParam = (Parameter<int[]>) AbstractGridFormat.BANDS.createValue();
+            bandIndicesParam.setValue(bandIndices);
+        }
+
         // then I try to get read parameters associated with this
         // coverage if there are any.
         GeneralParameterValue[] readParams = (GeneralParameterValue[]) params;
@@ -1485,10 +1627,12 @@ public class RenderedImageMapOutputFormat extends AbstractMapOutputFormat {
             final String readGGName = AbstractGridFormat.READ_GRIDGEOMETRY2D.getName().toString();
             final String readInterpolationName = ImageMosaicFormat.INTERPOLATION.getName().toString();
             final String bgColorName = AbstractGridFormat.BACKGROUND_COLOR.getName().toString();
+            final String bandsListName = AbstractGridFormat.BANDS.getName().toString();
             int i = 0;
             boolean foundInterpolation = false;
             boolean foundGG = false;
             boolean foundBgColor = false;
+            boolean foundBandIndices = false;
             for (; i < length; i++) {
                 final String paramName = readParams[i].getDescriptor().getName().toString();
                 if (paramName.equalsIgnoreCase(readGGName) && readGG != null) {
@@ -1501,10 +1645,14 @@ public class RenderedImageMapOutputFormat extends AbstractMapOutputFormat {
                     ((Parameter) readParams[i]).setValue(bgColor);
                     foundBgColor = true;
                 }
+                else if(paramName.equalsIgnoreCase(bandsListName) && bandIndices != null) {
+                    ((Parameter) readParams[i]).setValue(bandIndices);
+                    foundBandIndices = true;
+                }
             }
             
             // did we find anything?
-            if (!foundGG || !foundInterpolation || !(foundBgColor && bgColor != null)) {
+            if (!foundGG || !foundInterpolation || !(foundBgColor && bgColor != null) || !foundBandIndices) {
                 // add the correct read geometry to the supplied
                 // params since we did not find anything
                 List<GeneralParameterValue> paramList = new ArrayList<GeneralParameterValue>();
@@ -1518,6 +1666,9 @@ public class RenderedImageMapOutputFormat extends AbstractMapOutputFormat {
                 if(!foundBgColor && bgColor != null) {
                     paramList.add(bgColorParam);
                 }
+                if(!foundBandIndices && bandIndices != null) {
+                    paramList.add(bandIndicesParam);
+                }
                 readParams = paramList.toArray(new GeneralParameterValue[paramList
                         .size()]);
             }
@@ -1529,9 +1680,60 @@ public class RenderedImageMapOutputFormat extends AbstractMapOutputFormat {
             if (bgColor != null) {
                 paramList.add(bgColorParam);
             }
+            if (bandIndices != null) {
+                paramList.add(bandIndicesParam);
+            }
             paramList.add(readInterpolation);
             readParams = paramList.toArray(new GeneralParameterValue[paramList.size()]);
         }
         return readParams;
     }
+
+    private static LayerInfo.WMSInterpolation getConfiguredLayerInterpolation(LayerInfo layer) {
+
+        LayerInfo.WMSInterpolation configuredInterpolation = null;
+
+        if (layer != null && layer.getDefaultWMSInterpolationMethod() != null) {
+            try {
+                configuredInterpolation = layer.getDefaultWMSInterpolationMethod();
+            } catch (IllegalArgumentException e) {
+                // ignore
+            }
+        }
+
+        return configuredInterpolation;
+    }
+
+    private static Interpolation toInterpolationObject(LayerInfo.WMSInterpolation interpolationMethod) {
+        if (interpolationMethod == null) {
+            return null;
+        }
+
+        switch (interpolationMethod) {
+        case Bilinear:
+            return Interpolation.getInstance(Interpolation.INTERP_BILINEAR);
+        case Bicubic:
+            return Interpolation.getInstance(Interpolation.INTERP_BICUBIC);
+        case Nearest:
+        default:
+            return Interpolation.getInstance(Interpolation.INTERP_NEAREST);
+        }
+    }
+
+    private static Interpolation toInterpolationObject(WMSInfo.WMSInterpolation interpolationMethod) {
+        if (interpolationMethod == null) {
+            return null;
+        }
+
+        switch (interpolationMethod) {
+        case Bilinear:
+            return Interpolation.getInstance(Interpolation.INTERP_BILINEAR);
+        case Bicubic:
+            return Interpolation.getInstance(Interpolation.INTERP_BICUBIC);
+        case Nearest:
+        default:
+            return Interpolation.getInstance(Interpolation.INTERP_NEAREST);
+        }
+    }
+
 }

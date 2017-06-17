@@ -1,4 +1,4 @@
-/* (c) 2014 - 2015 Open Source Geospatial Foundation - all rights reserved
+/* (c) 2014 - 2016 Open Source Geospatial Foundation - all rights reserved
  * (c) 2001 - 2014 OpenPlans
  * This code is licensed under the GPL 2.0 license, available at the root
  * application directory.
@@ -8,6 +8,7 @@ package org.geoserver.wms.capabilities;
 import static org.geoserver.catalog.Predicates.and;
 import static org.geoserver.catalog.Predicates.asc;
 import static org.geoserver.catalog.Predicates.equal;
+import static org.geoserver.ows.util.ResponseUtils.appendPath;
 import static org.geoserver.ows.util.ResponseUtils.appendQueryString;
 import static org.geoserver.ows.util.ResponseUtils.buildSchemaURL;
 import static org.geoserver.ows.util.ResponseUtils.buildURL;
@@ -50,6 +51,7 @@ import org.geoserver.catalog.PublishedType;
 import org.geoserver.catalog.ResourceInfo;
 import org.geoserver.catalog.StyleInfo;
 import org.geoserver.catalog.WMSLayerInfo;
+import org.geoserver.catalog.WorkspaceInfo;
 import org.geoserver.catalog.util.CloseableIterator;
 import org.geoserver.config.ContactInfo;
 import org.geoserver.config.GeoServer;
@@ -656,13 +658,7 @@ public class Capabilities_1_3_0_Transformer extends TransformerBase {
             }
             
             // filter the layers if a namespace filter has been set
-            if (request.getNamespace() != null) {
-                //build a query predicate for the namespace prefix
-                final String nsPrefix = request.getNamespace();
-                final String nsProp = "resource.namespace.prefix";
-                Filter equals = equal(nsProp, nsPrefix);
-                filter = and(filter, equals);
-            }
+            filter = addNameSpaceFilterIfNeed(filter, "resource.namespace.prefix");
 
             final Catalog catalog = wmsConfig.getCatalog();
                         
@@ -671,7 +667,7 @@ public class Capabilities_1_3_0_Transformer extends TransformerBase {
             element("Abstract", serviceInfo.getAbstract());
 
             List<String> srsList = serviceInfo.getSRS();
-            Set<String> srs = new HashSet<String>();
+            Set<String> srs = new LinkedHashSet<String>();
             if (srsList != null) {
                 srs.addAll(srsList);
             }
@@ -680,10 +676,17 @@ public class Capabilities_1_3_0_Transformer extends TransformerBase {
             }
             handleRootCrsList(srs);
 
-            CloseableIterator<LayerInfo> layers;
-            layers = catalog.list(LayerInfo.class, filter);
+            // create layer groups filter
+            Filter lgFilter = Predicates.acceptAll();
+
+            // filter layer groups by namespace if needed
+            lgFilter = addNameSpaceFilterIfNeed(lgFilter, "workspace.name");
+
+            // handle root bounding box
+            CloseableIterator<LayerInfo> layers = catalog.list(LayerInfo.class, filter);
+            CloseableIterator<LayerGroupInfo> layerGroups = catalog.list(LayerGroupInfo.class, lgFilter);
             try{
-                handleRootBbox(layers);
+                handleRootBbox(layers, layerGroups);
             }finally{
                 layers.close();
             }
@@ -697,9 +700,7 @@ public class Capabilities_1_3_0_Transformer extends TransformerBase {
             Set<LayerInfo> layersAlreadyProcessed = new HashSet<LayerInfo>();
             
             // encode layer groups
-            CloseableIterator<LayerGroupInfo> layerGroups;
             {
-                final Filter lgFilter = Predicates.acceptAll();
                 SortBy layerGroupOrder = asc("name");
                 layerGroups = catalog.list(LayerGroupInfo.class, lgFilter, null, null,
                         layerGroupOrder);
@@ -723,6 +724,21 @@ public class Capabilities_1_3_0_Transformer extends TransformerBase {
             }
 
             end("Layer");
+        }
+
+        /**
+         * If the current request contains a namespace we build a filter using
+         * the provided property and request namespace and adds it to the provided
+         * filter. If the request doesn't contain a namespace the original filter
+         * is returned as is.
+         */
+        private Filter addNameSpaceFilterIfNeed(Filter filter, String nameSpaceProperty) {
+            String nameSpacePrefix = request.getNamespace();
+            if (nameSpacePrefix == null) {
+                return filter;
+            }
+            Filter equals = equal(nameSpaceProperty, nameSpacePrefix);
+            return and(filter, equals);
         }
 
         /**
@@ -750,7 +766,7 @@ public class Capabilities_1_3_0_Transformer extends TransformerBase {
                 capabilitiesCrsIdentifiers.addAll(CRS.getSupportedCodes("EPSG"));
             } else {
                 comment("Limited list of EPSG projections:");
-                capabilitiesCrsIdentifiers = new TreeSet<String>(epsgCodes);
+                capabilitiesCrsIdentifiers = new LinkedHashSet<String>(epsgCodes);
             }
 
             try {
@@ -758,8 +774,11 @@ public class Capabilities_1_3_0_Transformer extends TransformerBase {
                 String currentSRS;
 
                 while (it.hasNext()) {
-                    currentSRS = qualifySRS(it.next());
-                    element("CRS", currentSRS);
+                    String code = it.next();
+                    if(!"WGS84(DD)".equals(code)) {
+                        currentSRS = qualifySRS(code);
+                        element("CRS", currentSRS);
+                    }
                 }
             } catch (Exception e) {
                 LOGGER.log(Level.WARNING, e.getLocalizedMessage(), e);
@@ -780,32 +799,49 @@ public class Capabilities_1_3_0_Transformer extends TransformerBase {
         }
 
         /**
-         * Called by <code>handleLayers()</code>, iterates over the available featuretypes and
-         * coverages to summarize their LatLonBBox'es and write the aggregated bounds for the root
-         * layer.
-         * 
-         * @param ftypes
-         *            the collection of FeatureTypeInfo and CoverageInfo objects to traverse
+         * Called by <code>handleLayers()</code>, iterates over the available layers and
+         * layers groups to summarize their LatLonBBox'es and write the aggregated bounds
+         * for the root layer.
+         *
+         * @param layers available layers iterator
+         * @param layersGroups available layer groups iterator
          */
-        private void handleRootBbox(Iterator<LayerInfo> layers) {
+        private void handleRootBbox(Iterator<LayerInfo> layers, Iterator<LayerGroupInfo> layersGroups) {
 
             final Envelope world = new Envelope(-180, 180, -90, 90);
-            
             Envelope latlonBbox = new Envelope();
-            Envelope layerBbox = null;
 
             LOGGER.finer("Collecting summarized latlonbbox and common SRS...");
 
-            while(layers.hasNext()) {
-                LayerInfo layer = layers.next();
-                ResourceInfo resource = layer.getResource();
-                layerBbox = resource.getLatLonBoundingBox();
-                if (layerBbox != null) {
-                    latlonBbox.expandToInclude(layerBbox);    
+            // handle layers
+            while (layers.hasNext()) {
+                if (expandEnvelopeToContain(world, latlonBbox,
+                        layers.next().getResource().getLatLonBoundingBox())) {
+                    // our envelope already contains the world
+                    break;
                 }
+            }
 
-                //short cut for the case where we already reached the whole world bounds
-                if(latlonBbox.contains(world)){
+            // handle layer groups
+            while (layersGroups.hasNext()) {
+                LayerGroupInfo layerGroup = layersGroups.next();
+                ReferencedEnvelope referencedEnvelope = layerGroup.getBounds();
+                if (referencedEnvelope == null) {
+                    // no bounds available move on
+                    continue;
+                }
+                if (!CRS.equalsIgnoreMetadata(referencedEnvelope, DefaultGeographicCRS.WGS84)) {
+                    try {
+                        // we need to reproject the envelope to lat / lon
+                        referencedEnvelope = referencedEnvelope.transform(DefaultGeographicCRS.WGS84, true);
+                    } catch (Exception exception) {
+                        LOGGER.log(Level.WARNING, String.format(
+                                "Failed to transform layer group '%s' bounds to WGS84.",
+                                layerGroup.getName()), exception);
+                    }
+                }
+                if (expandEnvelopeToContain(world, latlonBbox, referencedEnvelope)) {
+                    // our envelope already contains the world
                     break;
                 }
             }
@@ -818,6 +854,17 @@ public class Capabilities_1_3_0_Transformer extends TransformerBase {
             handleBBox(latlonBbox, "CRS:84");
             handleAdditionalBBox(
                 new ReferencedEnvelope(latlonBbox, DefaultGeographicCRS.WGS84), null, null);
+        }
+
+        /**
+         * Helper method that expand a provided envelope to contain a resource envelope.
+         * If the extended envelope contains the world envelope TRUE is returned.
+         */
+        private boolean expandEnvelopeToContain(Envelope world, Envelope envelope, Envelope resourceEnvelope) {
+            if (resourceEnvelope != null) {
+                envelope.expandToInclude(resourceEnvelope);
+            }
+            return envelope.contains(world);
         }
 
         private void handleLayerTree(final Iterator<LayerInfo> layers, Set<LayerInfo> layersAlreadyProcessed) {
@@ -901,19 +948,7 @@ public class Capabilities_1_3_0_Transformer extends TransformerBase {
                 return false;
             }
 
-            boolean wmsExposable = false;
-            if (layer.getType() == PublishedType.RASTER || layer.getType() == PublishedType.WMS) {
-                wmsExposable = true;
-            } else {
-                try {
-                    wmsExposable = layer.getType() == PublishedType.VECTOR
-                            && ((FeatureTypeInfo) layer.getResource()).getFeatureType()
-                                    .getGeometryDescriptor() != null;
-                } catch (Exception e) {
-                    LOGGER.log(Level.SEVERE, "An error occurred trying to determine if"
-                            + " the layer is geometryless", e);
-                }
-            }
+            boolean wmsExposable = WMS.isWmsExposable(layer); 
             return wmsExposable;
         }
 
@@ -1164,6 +1199,9 @@ public class Capabilities_1_3_0_Transformer extends TransformerBase {
             } else {
                 element("Abstract", layerGroup.getAbstract());
             }
+
+            // handle keywords
+            handleKeywordList(layerGroup.getKeywords());
             
             final ReferencedEnvelope layerGroupBounds = layerGroup.getBounds();
             final ReferencedEnvelope latLonBounds = layerGroupBounds.transform(
@@ -1213,8 +1251,16 @@ public class Capabilities_1_3_0_Transformer extends TransformerBase {
             }
             handleMetadataList(metadataLinks);
 
+            // the layer style is not provided since the group does just have
+            // one possibility, the lack of styles that will make it use
+            // the default ones for each layer
+            handleScaleDenominator(layerGroup);
+            
             // handle children layers and groups
-            if (!LayerGroupInfo.Mode.SINGLE.equals(layerGroup.getMode())) {
+            if(LayerGroupInfo.Mode.OPAQUE_CONTAINER.equals(layerGroup.getMode())) {
+                // just hide the layers in the group
+                layersAlreadyProcessed.addAll(layerGroup.layers());
+            } else if (!LayerGroupInfo.Mode.SINGLE.equals(layerGroup.getMode())) {
                 for (PublishedInfo child : layerGroup.getLayers()) {
                     if (child instanceof LayerInfo) {
                         LayerInfo layer = (LayerInfo) child;
@@ -1228,12 +1274,6 @@ public class Capabilities_1_3_0_Transformer extends TransformerBase {
                 }
             }
             
-            // the layer style is not provided since the group does just have
-            // one possibility, the lack of styles that will make it use
-            // the default ones for each layer
-            
-            handleScaleDenominator(layerGroup);
-
             end("Layer");            
         }
         
@@ -1322,13 +1362,18 @@ public class Capabilities_1_3_0_Transformer extends TransformerBase {
                 attrs.clear();
                 attrs.addAttribute("", "xmlns:xlink", "xmlns:xlink", "", XLINK_NS);
                 attrs.addAttribute(XLINK_NS, "type", "xlink:type", "", "simple");
-                
-                String legendUrl = buildURL(request.getBaseUrl(), legend.getOnlineResource(), null, URLType.RESOURCE);
-                attrs.addAttribute(XLINK_NS, "href", "xlink:href", "", legendUrl);               
-                //attrs.addAttribute(XLINK_NS, "href", "xlink:href", "", legend.getOnlineResource());
-
+                WorkspaceInfo styleWs = sampleStyle.getWorkspace();
+                String legendUrl;
+                if ( styleWs != null){
+                    legendUrl = buildURL(request.getBaseUrl(),
+                            appendPath("styles", styleWs.getName() ,legend.getOnlineResource()), null, URLType.RESOURCE);
+                } else {
+                    legendUrl = buildURL(request.getBaseUrl(),
+                            appendPath("styles", legend.getOnlineResource()), null, URLType.RESOURCE);
+                }
+                attrs.addAttribute(XLINK_NS, "href", "xlink:href", "", legendUrl);
                 element("OnlineResource", null, attrs);
-
+                
                 end("LegendURL");
             } else {
                 int legendWidth = GetLegendGraphicRequest.DEFAULT_WIDTH;

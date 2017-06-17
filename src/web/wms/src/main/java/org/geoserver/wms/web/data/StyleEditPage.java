@@ -14,9 +14,7 @@ import org.apache.wicket.WicketRuntimeException;
 import org.apache.wicket.behavior.AttributeAppender;
 import org.apache.wicket.behavior.Behavior;
 import org.apache.wicket.markup.head.IHeaderResponse;
-import org.apache.wicket.markup.head.JavaScriptHeaderItem;
 import org.apache.wicket.markup.head.OnLoadHeaderItem;
-import org.apache.wicket.markup.html.form.Form;
 import org.apache.wicket.model.Model;
 import org.apache.wicket.model.StringResourceModel;
 import org.apache.wicket.request.mapper.parameter.PageParameters;
@@ -29,7 +27,9 @@ import org.geotools.util.Version;
  * Style edit page
  */
 public class StyleEditPage extends AbstractStylePage {
-    
+
+    private static final long serialVersionUID = 5478083954402101191L;
+
     public static final String NAME = "name";
     public static final String WORKSPACE = "workspace";
 
@@ -37,30 +37,30 @@ public class StyleEditPage extends AbstractStylePage {
         String name = parameters.get(NAME).toString();
         String workspace = parameters.get(WORKSPACE).toOptionalString();
 
-        StyleInfo si = workspace != null ? getCatalog().getStyleByName(workspace, name) : 
+        StyleInfo si = workspace != null ? getCatalog().getStyleByName(workspace, name) :
             getCatalog().getStyleByName(name);
-        
+
         if(si == null) {
             error(new ParamResourceModel("StyleEditPage.notFound", this, name).getString());
             doReturn(StylePage.class);
             return;
         }
         
+        recoverCssStyle(si);
+        initPreviewLayer(si);
         initUI(si);
 
         if (!isAuthenticatedAsAdmin()) {
-            Form f = (Form)get("form");
-    
             //global styles only editable by full admin
             if (si.getWorkspace() == null) {
                 styleForm.setEnabled(false);
-                nameTextField.setEnabled(false);
-                uploadForm.setEnabled(false);
 
-                editor.add(new AttributeAppender("class", new Model("disabled"), " "));
-                get("validate").add(new AttributeAppender("style", new Model("display:none;"), " "));
+                editor.add(new AttributeAppender("class", new Model<String>("disabled"), " "));
+                get("validate").add(new AttributeAppender("style", new Model<String>("display:none;"), " "));
                 add(new Behavior() {
-                    
+
+                    private static final long serialVersionUID = -4336130086161028141L;
+
                     @Override
                     public void renderHead(Component component, IHeaderResponse response) {
                         super.renderHead(component, response);
@@ -68,59 +68,63 @@ public class StyleEditPage extends AbstractStylePage {
                                 "document.getElementById('mainFormSubmit').style.display = 'none';"));
                         response.render(OnLoadHeaderItem.forScript(
                                 "document.getElementById('uploadFormSubmit').style.display = 'none';"));
-
                     }
-                    
                 });
-
                 info(new StringResourceModel("globalStyleReadOnly", this, null).getString());
             }
-
-            //always disable the workspace toggle
-            f.get("workspace").setEnabled(false);
         }
-
-        // format only settable upon creation
-        formatChoice.setEnabled(false);
-        formatReadOnlyMessage.setVisible(true);
     }
     
     public StyleEditPage(StyleInfo style) {
         super(style);
-        uploadForm.setVisible(false);
+    }
+    
+    @Override
+    protected String getTitle() {
+        StyleInfo style = styleModel.getObject();
+        String styleName = "";
+        if(style != null) {
+            styleName = (style.getWorkspace() == null ? "" : style.getWorkspace().getName() + ":")
+            + style.getName();
+        }
+
+        return new ParamResourceModel("title", this, styleName).getString();
     }
 
     @Override
     protected void onStyleFormSubmit() {
         // write out the file and save name modifications
         try {
-            StyleInfo style = (StyleInfo) styleForm.getModelObject();
-            String format = formatChoice.getModelObject();
+            StyleInfo style = getStyleInfo();
+            String format = style.getFormat();
             style.setFormat(format);
             Version version = Styles.handler(format).version(rawStyle);
-            style.setSLDVersion(version);
-            
+            style.setFormatVersion(version);
             // make sure the legend is null if there is no URL
             if (null == style.getLegend()
                     || null == style.getLegend().getOnlineResource()
                     || style.getLegend().getOnlineResource().isEmpty()) {
                 style.setLegend(null);
             }
-
-            // write out the SLD
+            // write out the SLD, we try to use the old style so the same path is used
+            StyleInfo stylePath = getCatalog().getStyle(style.getId());
+            if (stylePath == null) {
+                // the old style is no available anymore, so use the new path
+                stylePath = style;
+            }
+            // ask the catalog to write the style
             try {
-                getCatalog().getResourcePool().writeStyle(style,
-                        new ByteArrayInputStream(rawStyle.getBytes()));
+                getCatalog().getResourcePool().writeStyle(stylePath, new ByteArrayInputStream(rawStyle.getBytes()));
             } catch (IOException e) {
                 throw new WicketRuntimeException(e);
             }
+            // update the catalog
             getCatalog().save(style);
-            doReturn( StylePage.class );
+            // provide feedback to the user
+            styleForm.info("Style saved");
         } catch( Exception e ) {
             LOGGER.log(Level.SEVERE, "Error occurred saving the style", e);
             styleForm.error( e );
         }
-        
     }
-    
 }

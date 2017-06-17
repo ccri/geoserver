@@ -5,6 +5,8 @@
  */
 package org.geoserver.catalog;
 
+import java.awt.image.ColorModel;
+import java.awt.image.SampleModel;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Iterator;
@@ -15,6 +17,7 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 import javax.measure.unit.Unit;
+import javax.media.jai.ImageLayout;
 import javax.media.jai.PlanarImage;
 
 import org.geoserver.catalog.impl.FeatureTypeInfoImpl;
@@ -28,6 +31,7 @@ import org.geoserver.data.util.CoverageUtils;
 import org.geoserver.ows.util.OwsUtils;
 import org.geotools.coverage.Category;
 import org.geotools.coverage.GridSampleDimension;
+import org.geotools.coverage.TypeMap;
 import org.geotools.coverage.grid.GridCoverage2D;
 import org.geotools.coverage.grid.GridEnvelope2D;
 import org.geotools.coverage.grid.GridGeometry2D;
@@ -48,6 +52,7 @@ import org.geotools.resources.image.ImageUtilities;
 import org.geotools.util.NumberRange;
 import org.geotools.util.Version;
 import org.geotools.util.logging.Logging;
+import org.opengis.coverage.ColorInterpretation;
 import org.opengis.coverage.grid.Format;
 import org.opengis.coverage.grid.GridEnvelope;
 import org.opengis.feature.type.FeatureType;
@@ -62,6 +67,7 @@ import org.opengis.referencing.crs.CoordinateReferenceSystem;
 import org.opengis.referencing.crs.GeographicCRS;
 import org.opengis.referencing.datum.PixelInCell;
 import org.opengis.referencing.operation.MathTransform;
+import org.opengis.referencing.operation.TransformException;
 
 import com.vividsolutions.jts.geom.LineString;
 import com.vividsolutions.jts.geom.MultiLineString;
@@ -523,7 +529,7 @@ public class CatalogBuilder {
             if (!CRS.equalsIgnoreMetadata(DefaultGeographicCRS.WGS84, declaredCRS)) {
                 // transform
                 try {
-                    ReferencedEnvelope bounds = new ReferencedEnvelope(nativeBounds, declaredCRS);
+                    ReferencedEnvelope bounds = new ReferencedEnvelope(nativeBounds, CRS.getHorizontalCRS(declaredCRS));
                     return bounds.transform(DefaultGeographicCRS.WGS84, true);
                 } catch (Exception e) {
                     throw (IOException) new IOException("transform error").initCause(e);
@@ -860,25 +866,53 @@ public class CatalogBuilder {
     }
 
     /**
+     * Builds the default coverage contained in the current store
+     *
+     * @param nativeCoverageName the native name for the coverage
+     * @param specifiedName the published name for the coverage. If null, the name will be determined from the coverage store.
+     * @return coverage for the specified name
+     * @throws Exception if the coverage store was not found or could not be read, or if the coverage could not be created.
+     */
+    public CoverageInfo buildCoverageByName(String nativeCoverageName, String specifiedName) throws Exception {
+        if (store == null || !(store instanceof CoverageStoreInfo)) {
+            throw new IllegalStateException("Coverage store not set.");
+        }
+
+        CoverageStoreInfo csinfo = (CoverageStoreInfo) store;
+        GridCoverage2DReader reader = (GridCoverage2DReader) catalog
+                .getResourcePool().getGridCoverageReader(csinfo, GeoTools.getDefaultHints());
+
+        if (reader == null)
+            throw new Exception("Unable to acquire a reader for this coverage with format: "
+                    + csinfo.getFormat().getName());
+
+        return buildCoverageInternal(reader, nativeCoverageName, null, specifiedName);
+    }
+
+    /**
      * Builds a coverage from a geotools grid coverage reader.
      * @param customParameters 
      */
     public CoverageInfo buildCoverage(GridCoverage2DReader reader, Map customParameters) throws Exception {
         return buildCoverage(reader, null, customParameters);
     }
-    
+
     /**
      * Builds a coverage from a geotools grid coverage reader.
      * @param customParameters 
      */
     public CoverageInfo buildCoverage(GridCoverage2DReader reader, String coverageName, Map customParameters) throws Exception {
+        return buildCoverageInternal(reader, coverageName, customParameters, null);
+    }
+
+    private CoverageInfo buildCoverageInternal(GridCoverage2DReader reader, String nativeCoverageName, Map customParameters, String specifiedName) throws Exception {
         if (store == null || !(store instanceof CoverageStoreInfo)) {
             throw new IllegalStateException("Coverage store not set.");
         }
         
         // if we are dealing with a multicoverage reader, wrap to simplify code
-        if (coverageName != null) {
-            reader = SingleGridCoverage2DReader.wrap(reader, coverageName);
+        if (nativeCoverageName != null) {
+            reader = SingleGridCoverage2DReader.wrap(reader, nativeCoverageName);
         }
 
         CoverageStoreInfo csinfo = (CoverageStoreInfo) store;
@@ -887,8 +921,8 @@ public class CatalogBuilder {
         cinfo.setStore(csinfo);
         cinfo.setEnabled(true);
 
-        WorkspaceInfo workspace = store.getWorkspace();
-        NamespaceInfo namespace = catalog.getNamespaceByPrefix(workspace.getName());
+        WorkspaceInfo wspace = store.getWorkspace();
+        NamespaceInfo namespace = catalog.getNamespaceByPrefix(wspace.getName());
         if (namespace == null) {
             namespace = catalog.getDefaultNamespace();
         }
@@ -935,80 +969,39 @@ public class CatalogBuilder {
         //
         // /////////////////////////////////////////////////////////////////////
         Format format = csinfo.getFormat();
-        final GridCoverage2D gc;
-
         final ParameterValueGroup readParams = format.getReadParameters();
-        final Map parameters = CoverageUtils.getParametersKVP(readParams);
-        final int minX = originalRange.getLow(0);
-        final int minY = originalRange.getLow(1);
-        final int width = originalRange.getSpan(0);
-        final int height = originalRange.getSpan(1);
-        final int maxX = minX + (width <= 5 ? width : 5);
-        final int maxY = minY + (height <= 5 ? height : 5);
 
-        // we have to be sure that we are working against a valid grid range.
-        final GridEnvelope2D testRange = new GridEnvelope2D(minX, minY, maxX, maxY);
+        GridSampleDimension[] sampleDimensions = getCoverageSampleDimensions(reader, customParameters);
+        List<CoverageDimensionInfo> coverageDimensions = getCoverageDimensions(sampleDimensions);
 
-        // build the corresponding envelope
-        final MathTransform gridToWorldCorner = reader.getOriginalGridToWorld(PixelInCell.CELL_CORNER);
-        final GeneralEnvelope testEnvelope = CRS.transform(gridToWorldCorner, new GeneralEnvelope(testRange.getBounds()));
-        testEnvelope.setCoordinateReferenceSystem(nativeCRS);
-
-        if (customParameters != null) {
-        	parameters.putAll(customParameters);
+        cinfo.getDimensions().addAll(coverageDimensions);
+        if (specifiedName != null) {
+            cinfo.setName(specifiedName);
+            cinfo.setTitle(specifiedName);
+            cinfo.getKeywords().add(new Keyword(specifiedName));
+        } else {
+            String name = reader.getGridCoverageNames()[0];
+            cinfo.setName(name);
+            cinfo.setTitle(name);
+            cinfo.getKeywords().add(new Keyword(name));
         }
+        cinfo.setNativeCoverageName(nativeCoverageName);
 
-        // make sure mosaics with many superimposed tiles won't blow up with 
-        // a "too many open files" exception
-        String maxAllowedTiles = ImageMosaicFormat.MAX_ALLOWED_TILES.getName().toString();
-        if (parameters.keySet().contains(maxAllowedTiles)) {
-            parameters.put(maxAllowedTiles, 1);
-        }
-
-        // Since the read sample image won't be greater than 5x5 pixels and we are limiting the
-        // number of granules to 1, we may do direct read instead of using JAI
-        String useJaiImageRead = ImageMosaicFormat.USE_JAI_IMAGEREAD.getName().toString();
-        if (parameters.keySet().contains(useJaiImageRead)) {
-            parameters.put(useJaiImageRead, false);
-        }
-
-        parameters.put(AbstractGridFormat.READ_GRIDGEOMETRY2D.getName().toString(), new GridGeometry2D(testRange, testEnvelope));
-
-        // try to read this coverage
-        gc = reader.read(CoverageUtils.getParameters(readParams, parameters, true));
-        if (gc == null) {
-            throw new Exception("Unable to acquire test coverage for format:" + format.getName());
-        }
-
-        // remove read grid geometry since it is request specific
-        parameters.remove(AbstractGridFormat.READ_GRIDGEOMETRY2D.getName().toString());
-
-        cinfo.getDimensions().addAll(getCoverageDimensions(gc.getSampleDimensions()));
-        String name = gc.getName().toString();
-        cinfo.setName(name);
-        cinfo.setNativeCoverageName(coverageName);
-        cinfo.setTitle(name);
         cinfo.setDescription(new StringBuilder("Generated from ").append(format.getName()).toString());
 
         // keywords
         cinfo.getKeywords().add(new Keyword("WCS"));
         cinfo.getKeywords().add(new Keyword(format.getName()));
-        cinfo.getKeywords().add(new Keyword(name));
 
         // native format name
         cinfo.setNativeFormat(format.getName());
-        cinfo.getMetadata().put("dirName", new StringBuilder(store.getName()).append("_").append(name).toString());
+        cinfo.getMetadata().put("dirName", new StringBuilder(store.getName()).append("_").append(nativeCoverageName).toString());
 
-        // request SRS's
-        if ((gc.getCoordinateReferenceSystem2D().getIdentifiers() != null)
-                && !gc.getCoordinateReferenceSystem2D().getIdentifiers().isEmpty()) {
-            cinfo.getRequestSRS().add(((Identifier) gc.getCoordinateReferenceSystem2D().getIdentifiers().toArray()[0]).toString());
-        }
-
-        // response SRS's
-        if ((gc.getCoordinateReferenceSystem2D().getIdentifiers() != null)
-                && !gc.getCoordinateReferenceSystem2D().getIdentifiers().isEmpty()) {
-            cinfo.getResponseSRS().add(((Identifier) gc.getCoordinateReferenceSystem2D().getIdentifiers().toArray()[0]).toString());
+        // request and response SRS's
+        if ((nativeCRS.getIdentifiers() != null)
+                && !nativeCRS.getIdentifiers().isEmpty()) {
+            cinfo.getRequestSRS().add(((Identifier) nativeCRS.getIdentifiers().toArray()[0]).toString());
+            cinfo.getResponseSRS().add(((Identifier) nativeCRS.getIdentifiers().toArray()[0]).toString());
         }
 
         // supported formats
@@ -1042,13 +1035,88 @@ public class CatalogBuilder {
         // coverage read)
         cinfo.getParameters().putAll(CoverageUtils.getParametersKVP(readParams));
 
-        /// dispose coverage 
-        gc.dispose(true);
-        if(gc.getRenderedImage() instanceof PlanarImage) {
-            ImageUtilities.disposePlanarImageChain((PlanarImage) gc.getRenderedImage());
+        return cinfo;
+    }
+
+    private GridSampleDimension[] getCoverageSampleDimensions(GridCoverage2DReader reader, Map customParameters)
+            throws TransformException, IOException, Exception {
+        GridEnvelope originalRange = reader.getOriginalGridRange();
+        Format format = reader.getFormat();
+        final ParameterValueGroup readParams = format.getReadParameters();
+        final Map parameters = CoverageUtils.getParametersKVP(readParams);
+        final int minX = originalRange.getLow(0);
+        final int minY = originalRange.getLow(1);
+        final int width = originalRange.getSpan(0);
+        final int height = originalRange.getSpan(1);
+        final int maxX = minX + (width <= 5 ? width : 5);
+        final int maxY = minY + (height <= 5 ? height : 5);
+
+        // we have to be sure that we are working against a valid grid range.
+        final GridEnvelope2D testRange = new GridEnvelope2D(minX, minY, maxX, maxY);
+
+        // build the corresponding envelope
+        final MathTransform gridToWorldCorner = reader.getOriginalGridToWorld(PixelInCell.CELL_CORNER);
+       
+        final GeneralEnvelope testEnvelope = CRS.transform(gridToWorldCorner, new GeneralEnvelope(testRange.getBounds()));
+        testEnvelope.setCoordinateReferenceSystem(reader.getCoordinateReferenceSystem());
+
+        if (customParameters != null) {
+        	parameters.putAll(customParameters);
         }
 
-        return cinfo;
+        // make sure mosaics with many superimposed tiles won't blow up with 
+        // a "too many open files" exception
+        String maxAllowedTiles = ImageMosaicFormat.MAX_ALLOWED_TILES.getName().toString();
+        if (parameters.keySet().contains(maxAllowedTiles)) {
+            parameters.put(maxAllowedTiles, 1);
+        }
+
+        // Since the read sample image won't be greater than 5x5 pixels and we are limiting the
+        // number of granules to 1, we may do direct read instead of using JAI
+        String useJaiImageRead = ImageMosaicFormat.USE_JAI_IMAGEREAD.getName().toString();
+        if (parameters.keySet().contains(useJaiImageRead)) {
+            parameters.put(useJaiImageRead, false);
+        }
+
+        parameters.put(AbstractGridFormat.READ_GRIDGEOMETRY2D.getName().toString(), new GridGeometry2D(testRange, testEnvelope));
+
+        // try to read this coverage
+        final GridCoverage2D gc = reader.read(CoverageUtils.getParameters(readParams, parameters, true));
+        final GridSampleDimension[] sampleDimensions;
+        if (gc != null) {
+            // remove read grid geometry since it is request specific
+            parameters.remove(AbstractGridFormat.READ_GRIDGEOMETRY2D.getName().toString());
+            sampleDimensions = gc.getSampleDimensions();
+            /// dispose coverage 
+            gc.dispose(true);
+            if(gc.getRenderedImage() instanceof PlanarImage) {
+                ImageUtilities.disposePlanarImageChain((PlanarImage) gc.getRenderedImage());
+            }
+        } else {
+            final ImageLayout imageLayout = reader.getImageLayout();
+            if(imageLayout == null) {
+                throw new Exception("Unable to acquire test coverage and image layout for format:" + format.getName());
+            }
+            ColorModel cm = imageLayout.getColorModel(null);
+            if(cm == null) {
+                throw new Exception("Unable to acquire test coverage and color model for format:" + format.getName());
+            }
+            SampleModel sm = imageLayout.getSampleModel(null);
+            if(cm == null) {
+                throw new Exception("Unable to acquire test coverage and sample model for format:" + format.getName());
+            }
+            final int numBands = sm.getNumBands();
+            sampleDimensions = new GridSampleDimension[numBands];
+            // setting bands names.
+            for (int i = 0; i < numBands; i++) {
+                final ColorInterpretation colorInterpretation = TypeMap.getColorInterpretation(cm, i);
+                if (colorInterpretation == null)
+                    throw new IOException("Unrecognized sample dimension type for band number " + (i + 1));
+                sampleDimensions[i] = new GridSampleDimension(colorInterpretation.name());
+            }
+
+        }
+        return sampleDimensions;
     }
 
     List<CoverageDimensionInfo> getCoverageDimensions(GridSampleDimension[] sampleDimensions) {

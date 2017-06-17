@@ -25,6 +25,7 @@ import org.apache.wicket.Session;
 import org.apache.wicket.core.request.handler.IPageRequestHandler;
 import org.apache.wicket.core.request.handler.PageProvider;
 import org.apache.wicket.protocol.http.WebApplication;
+import org.apache.wicket.protocol.http.WebSession;
 import org.apache.wicket.protocol.http.servlet.ServletWebRequest;
 import org.apache.wicket.request.IExceptionMapper;
 import org.apache.wicket.request.IRequestHandler;
@@ -35,9 +36,11 @@ import org.apache.wicket.request.component.IRequestablePage;
 import org.apache.wicket.request.cycle.AbstractRequestCycleListener;
 import org.apache.wicket.request.cycle.RequestCycle;
 import org.apache.wicket.resource.loader.IStringResourceLoader;
+import org.apache.wicket.settings.RequestCycleSettings.RenderStrategy;
 import org.apache.wicket.util.IProvider;
 import org.geoserver.catalog.Catalog;
 import org.geoserver.config.GeoServer;
+import org.geoserver.config.GeoServerInfo.WebUIMode;
 import org.geoserver.platform.GeoServerExtensions;
 import org.geoserver.platform.GeoServerResourceLoader;
 import org.geoserver.security.GeoServerSecurityManager;
@@ -52,6 +55,11 @@ import org.geotools.util.logging.Logging;
 import org.springframework.beans.BeansException;
 import org.springframework.context.ApplicationContext;
 import org.springframework.context.ApplicationContextAware;
+import org.springframework.context.ApplicationEvent;
+import org.springframework.context.ApplicationListener;
+import org.springframework.security.authentication.AuthenticationEventPublisher;
+import org.springframework.security.authentication.event.AuthenticationSuccessEvent;
+import org.springframework.security.authentication.event.InteractiveAuthenticationSuccessEvent;
 
 /**
  * The GeoServer application, the main entry point for any Wicket application. In particular, this one sets up, among the others, custom resource
@@ -61,7 +69,7 @@ import org.springframework.context.ApplicationContextAware;
  * @author Andrea Aaime, The Open Planning Project
  * @author Justin Deoliveira, The Open Planning Project
  */
-public class GeoServerApplication extends WebApplication implements ApplicationContextAware {
+public class GeoServerApplication extends WebApplication implements ApplicationContextAware, ApplicationListener<ApplicationEvent> {
 
     /**
      * logger for web application
@@ -72,6 +80,30 @@ public class GeoServerApplication extends WebApplication implements ApplicationC
             .valueOf(System.getProperty("org.geoserver.web.browser.detect", "true"));
 
     ApplicationContext applicationContext;
+
+    /**
+     * Default redirect mode. Determines whether default webUIMode setting means redirect or not (default is true).
+     */
+    protected boolean defaultIsRedirect = true;
+
+    /**
+     * Get default redirect mode.
+     * 
+     * @return default redirect mode.
+     */
+    public boolean isDefaultIsRedirect() {
+        return defaultIsRedirect;
+    }
+
+    /**
+     * Set default redirect mode. 
+     * (must be called before init method, usually by Spring PropertyOverriderConfigurer)
+     * 
+     * @param defaultIsRedirect
+     */
+    public void setDefaultIsRedirect(boolean defaultIsRedirect) {
+        this.defaultIsRedirect = defaultIsRedirect;
+    }
 
     /**
      * The {@link GeoServerHomePage}.
@@ -194,6 +226,22 @@ public class GeoServerApplication extends WebApplication implements ApplicationC
         setRootRequestMapper(new DynamicCryptoMapper(getRootRequestMapper(), securityManager, this));
         
         getRequestCycleListeners().add(new CallbackRequestCycleListener(this));
+
+        WebUIMode webUIMode = getGeoServer().getGlobal().getWebUIMode();
+        if (webUIMode == null) {
+            webUIMode = WebUIMode.DEFAULT;
+        }
+        switch (webUIMode) {
+        case DO_NOT_REDIRECT:
+            getRequestCycleSettings().setRenderStrategy(RenderStrategy.ONE_PASS_RENDER);
+            break;
+        case REDIRECT:
+            getRequestCycleSettings().setRenderStrategy(RenderStrategy.REDIRECT_TO_BUFFER);
+            break;
+        case DEFAULT:
+            getRequestCycleSettings().setRenderStrategy(defaultIsRedirect ?
+                    RenderStrategy.REDIRECT_TO_BUFFER : RenderStrategy.ONE_PASS_RENDER);
+        }
     }
 
     @Override
@@ -298,19 +346,19 @@ public class GeoServerApplication extends WebApplication implements ApplicationC
         
         @Override
         public void onRequestHandlerScheduled(RequestCycle cycle, IRequestHandler handler) {
-            processHandler(handler);
+            processHandler(cycle, handler);
         }
 
-        private void processHandler(IRequestHandler handler) {
+        private void processHandler(RequestCycle cycle, IRequestHandler handler) {
             if(handler instanceof IPageRequestHandler) {
                 IPageRequestHandler pageHandler = (IPageRequestHandler) handler;
                 Class<? extends IRequestablePage> pageClass = pageHandler.getPageClass();
                 for (WicketCallback callback : callbacks) {
-                    callback.onRequestTargetSet(pageClass);
+                    callback.onRequestTargetSet(cycle, pageClass);
                 }
             } else if(handler instanceof IRequestHandlerDelegate) {
                 IRequestHandlerDelegate delegator = (IRequestHandlerDelegate) handler;
-                processHandler(delegator.getDelegateHandler());
+                processHandler(cycle, delegator.getDelegateHandler());
             }
             
         }
@@ -318,7 +366,7 @@ public class GeoServerApplication extends WebApplication implements ApplicationC
         @Override
         public void onRequestHandlerResolved(org.apache.wicket.request.cycle.RequestCycle cycle,
                 IRequestHandler handler) {
-            processHandler(handler);
+            processHandler(cycle, handler);
         }
 
         @Override
@@ -361,5 +409,14 @@ public class GeoServerApplication extends WebApplication implements ApplicationC
         }
 
         return ((ServletWebRequest) req).getContainerRequest();
+    }
+
+    public void onApplicationEvent(ApplicationEvent event) {
+        if(event instanceof AuthenticationSuccessEvent || event instanceof InteractiveAuthenticationSuccessEvent) {
+            if(Session.exists()) {
+                WebSession.get().replaceSession();
+            }
+        }
+        
     }
 }

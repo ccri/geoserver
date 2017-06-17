@@ -6,10 +6,12 @@
 package org.geoserver.platform.resource;
 
 import java.io.File;
+import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.io.Serializable;
 import java.util.List;
+
+import org.apache.commons.io.IOUtils;
 
 /**
  * Resource used for configuration storage.
@@ -20,7 +22,7 @@ import java.util.List;
  * Resource creation is handled in a lazy fashion, simply use {@link #file()} or {@link #out()} and the resource will be created as required. In a
  * similar fashion setting up a child resource will create any required parent directories.
  */
-public interface Resource extends Serializable {
+public interface Resource {
     /**
      * Enumeration indicating kind of resource used.
      */
@@ -186,4 +188,30 @@ public interface Resource extends Serializable {
      *
      */
     boolean renameTo(Resource dest);
+    
+    
+    /**
+     * Returns a resource full contents as a byte array. Usage is suggested only if 
+     * the resource is known to be small (e.g. a configuration file).
+     * @return
+     * @throws IOException 
+     */
+    default byte[] getContents() throws IOException {
+        try(InputStream in = in()) {
+            return org.apache.commons.io.IOUtils.toByteArray(in);
+        }
+    }
+
+    /**
+     * Writes a resource contents as a byte array. Usage is suggested only if the resource
+     * is known to be small (e.g. a configuration file).
+     * @param byteArray
+     * @throws IOException
+     */
+    default void setContents(byte[] byteArray) throws IOException {
+        try(OutputStream os = out()) {
+            IOUtils.write(byteArray, os);
+        }
+    }
+
 }

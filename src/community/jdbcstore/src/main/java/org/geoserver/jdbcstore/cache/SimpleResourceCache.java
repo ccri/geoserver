@@ -1,4 +1,4 @@
-/* Copyright (c) 2015 OpenPlans - www.openplans.org. All rights reserved.
+/* (c) 2015 Open Source Geospatial Foundation - all rights reserved
  * This code is licensed under the GPL 2.0 license, available at the root
  * application directory.
  */
@@ -70,7 +70,7 @@ public class SimpleResourceCache implements ResourceCache {
         String path = res.path();
         long mtime = res.lastmodified();
         File cached = new File(base, path);
-        if(!cached.exists() || cached.lastModified()>mtime) {
+        if(!cached.exists() || cached.lastModified()<mtime) {
             Resource.Type type = res.getType();
             switch (type) {
             case RESOURCE:

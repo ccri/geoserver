@@ -1,28 +1,21 @@
+/* (c) 2013 Open Source Geospatial Foundation - all rights reserved
+ * This code is licensed under the GPL 2.0 license, available at the root
+ * application directory.
+ */
 package org.geoserver.importer.rest;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertThat;
-import static org.junit.Assert.assertTrue;
-
-import java.io.File;
-import java.io.FileOutputStream;
-import java.io.IOException;
-import java.util.Properties;
-
+import com.vividsolutions.jts.geom.Coordinate;
+import com.vividsolutions.jts.geom.Point;
+import net.sf.json.JSONObject;
+import org.apache.commons.httpclient.HttpStatus;
 import org.apache.commons.io.FileUtils;
-import org.geoserver.catalog.Catalog;
-import org.geoserver.catalog.CatalogBuilder;
-import org.geoserver.catalog.CoverageStoreInfo;
-import org.geoserver.catalog.FeatureTypeInfo;
-import org.geoserver.catalog.LayerInfo;
-import org.geoserver.catalog.ResourceInfo;
-import org.geoserver.catalog.WorkspaceInfo;
+import org.geoserver.catalog.*;
 import org.geoserver.importer.ImportContext;
 import org.geoserver.importer.ImportTask;
 import org.geoserver.importer.ImporterTestSupport;
 import org.geoserver.importer.transform.AttributesToPointGeometryTransform;
 import org.geoserver.importer.transform.TransformChain;
+import org.geoserver.security.impl.GeoServerUser;
 import org.geotools.coverage.grid.io.GranuleSource;
 import org.geotools.coverage.grid.io.StructuredGridCoverage2DReader;
 import org.geotools.data.DataUtilities;
@@ -41,19 +34,39 @@ import org.opengis.feature.simple.SimpleFeature;
 import org.opengis.feature.simple.SimpleFeatureType;
 import org.opengis.feature.type.FeatureType;
 import org.opengis.feature.type.GeometryDescriptor;
+import org.springframework.mock.web.MockHttpServletResponse;
+import org.springframework.security.authentication.AnonymousAuthenticationToken;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.GrantedAuthority;
+import org.springframework.security.core.context.SecurityContextHolder;
 
-import com.vividsolutions.jts.geom.Coordinate;
-import com.vividsolutions.jts.geom.Point;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Properties;
 
-import net.sf.json.JSONObject;
+import static org.hamcrest.CoreMatchers.is;
+import static org.hamcrest.CoreMatchers.notNullValue;
+import static org.junit.Assert.*;
 
 public class ImporterIntegrationTest extends ImporterTestSupport {
+
+    @Override
+    protected void setUpSpring(List<String> springContextLocations) {
+        super.setUpSpring(springContextLocations);
+        springContextLocations.add("classpath:TestContext.xml");
+    }
 
     @Before
     public void createH2Store() throws Exception {
         // create the store for the indirect imports
         String wsName = getCatalog().getDefaultWorkspace().getName();
         createH2DataStore(wsName, "h2");
+        // remove any callback set to check the request spring context
+        RequestContextListener listener = applicationContext.getBean(RequestContextListener.class);
+        listener.setCallBack(null);
     }
 
     @Test
@@ -204,6 +217,20 @@ public class ImporterIntegrationTest extends ImporterTestSupport {
     }
 
     void testDirectExecuteInternal(boolean async) throws Exception {
+
+        // set a callback to check that the request spring context is passed to the job thread
+        RequestContextListener listener = applicationContext.getBean(RequestContextListener.class);
+        SecurityContextHolder.getContext().setAuthentication(createAuthentication());
+        
+        final boolean[] invoked = {false};
+        listener.setCallBack((request, user, resource) -> {
+            Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+            assertThat(request, notNullValue());
+            assertThat(resource, notNullValue());
+            assertThat(auth, notNullValue());
+            invoked[0] = true;
+        });
+
         File gmlFile = file("gml/poi.gml2.gml");
         String wsName = getCatalog().getDefaultWorkspace().getName();
 
@@ -233,8 +260,9 @@ public class ImporterIntegrationTest extends ImporterTestSupport {
                 + (async ? "&async=true" : ""), contextDefinition, "application/json"));
         // print(json);
         String state = null;
+        int importId;
         if (async) {
-            int importId = json.getJSONObject("import").getInt("id");
+            importId = json.getJSONObject("import").getInt("id");
             for (int i = 0; i < 60 * 2 * 2; i++) {
                 json = (JSONObject) getAsJSON("/rest/imports/" + importId);
                 // print(json);
@@ -245,11 +273,27 @@ public class ImporterIntegrationTest extends ImporterTestSupport {
             }
         } else {
             state = json.getJSONObject("import").getString("state");
+            importId = json.getJSONObject("import").getInt("id");
         }
+        Thread.sleep(500);
         assertEquals("COMPLETE", state);
+        assertThat(invoked[0], is(true));
         checkPoiImport();
+
+        //Test delete
+        MockHttpServletResponse resp = deleteAsServletResponse("/rest/imports/"+importId);
+        assertEquals(204, resp.getStatus());
     }
 
+    protected Authentication createAuthentication() {
+        GeoServerUser anonymous = GeoServerUser.createAnonymous();
+        List<GrantedAuthority> roles = new ArrayList<GrantedAuthority>();
+        roles.addAll(anonymous.getAuthorities());
+        AnonymousAuthenticationToken auth = new AnonymousAuthenticationToken("geoserver", 
+                anonymous.getUsername(),roles);
+        return auth;
+    }
+    
     private String jsonSafePath(File gmlFile) throws IOException {
         return gmlFile.getCanonicalPath().replace('\\', '/');
     }
@@ -352,5 +396,4 @@ public class ImporterIntegrationTest extends ImporterTestSupport {
         }
         mosaicRoot.mkdirs();
     }
-
 }

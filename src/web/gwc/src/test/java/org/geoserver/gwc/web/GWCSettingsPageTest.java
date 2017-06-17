@@ -49,6 +49,7 @@ public class GWCSettingsPageTest extends GeoServerWicketTestSupport {
         GWC gwc = GWC.get();
         GWCConfig config = gwc.getConfig();
         config.setLockProviderName(null);
+        config.setInnerCachingEnabled(false);
         gwc.saveConfig(config);
     }
 
@@ -69,23 +70,6 @@ public class GWCSettingsPageTest extends GeoServerWicketTestSupport {
         testEditCheckboxOption("form:gwcServicesPanel:enableWMSC", "gwcServicesPanel:enableWMSC",
                 enabled);
         assertEquals(!enabled, gwc.getConfig().isWMSCEnabled());
-    }
-
-    @Test public void testEditEnableWMTS() {
-        GWC gwc = GWC.get();
-        boolean enabled = gwc.getConfig().isWMTSEnabled();
-        testEditCheckboxOption("form:gwcServicesPanel:enableWMTS", "gwcServicesPanel:enableWMTS",
-                enabled);
-        assertEquals(!enabled, gwc.getConfig().isWMTSEnabled());
-    }
-
-    @Test
-    public void testEditEnableTMS() {
-        GWC gwc = GWC.get();
-        boolean enabled = gwc.getConfig().isTMSEnabled();
-        testEditCheckboxOption("form:gwcServicesPanel:enableTMS", "gwcServicesPanel:enableTMS",
-                enabled);
-        assertEquals(!enabled, gwc.getConfig().isTMSEnabled());
     }
 
     @Test
@@ -411,5 +395,20 @@ public class GWCSettingsPageTest extends GeoServerWicketTestSupport {
         assertTrue(evictionPolicies.contains(CacheConfiguration.EvictionPolicy.NULL));
         assertTrue(evictionPolicies.contains(CacheConfiguration.EvictionPolicy.EXPIRE_AFTER_ACCESS));
         assertTrue(evictionPolicies.contains(CacheConfiguration.EvictionPolicy.EXPIRE_AFTER_WRITE));
+    }
+    
+    @SuppressWarnings("unchecked")
+    @Test
+    public void testMemoryCachePanelOpen() throws IOException {
+        // enable in memory caching
+        GWC gwc = GWC.get();
+        GWCConfig config = gwc.getConfig();
+        config.setInnerCachingEnabled(true);
+        gwc.saveConfig(config);
+
+        // used to blow because an unused label element was added in the code but not in HTML 
+        GWCSettingsPage page = new GWCSettingsPage();
+        tester.startPage(page);
+        tester.assertVisible("form:cachingOptionsPanel:container:configs:blobstores:container");
     }
 }

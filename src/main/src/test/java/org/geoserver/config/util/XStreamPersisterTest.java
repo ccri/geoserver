@@ -47,6 +47,7 @@ import org.geoserver.catalog.DataStoreInfo;
 import org.geoserver.catalog.FeatureTypeInfo;
 import org.geoserver.catalog.Keyword;
 import org.geoserver.catalog.LayerGroupInfo;
+import org.geoserver.catalog.LayerGroupInfo.Mode;
 import org.geoserver.catalog.LayerInfo;
 import org.geoserver.catalog.MetadataMap;
 import org.geoserver.catalog.NamespaceInfo;
@@ -56,6 +57,8 @@ import org.geoserver.catalog.WMSStoreInfo;
 import org.geoserver.catalog.WorkspaceInfo;
 import org.geoserver.catalog.impl.CatalogImpl;
 import org.geoserver.catalog.impl.CoverageDimensionImpl;
+import org.geoserver.catalog.impl.CoverageStoreInfoImpl;
+import org.geoserver.catalog.impl.DataStoreInfoImpl;
 import org.geoserver.catalog.impl.MetadataLinkInfoImpl;
 import org.geoserver.catalog.impl.WMSStoreInfoImpl;
 import org.geoserver.config.ContactInfo;
@@ -77,6 +80,7 @@ import org.geotools.referencing.wkt.UnformattableObjectException;
 import org.geotools.util.NumberRange;
 import org.junit.Assert;
 import org.junit.Before;
+import org.junit.Ignore;
 import org.junit.Test;
 import org.opengis.referencing.crs.CoordinateReferenceSystem;
 import org.w3c.dom.Document;
@@ -303,9 +307,38 @@ public class XStreamPersisterTest {
         DataStoreInfo ds2 = persister.load( in( out ), DataStoreInfo.class );
         assertEquals( "bar", ds2.getName() );
         
-        //TODO: reenable when resolving proxy commited
-        //assertNotNull( ds2.getWorkspace() );
-        //assertEquals( "foo", ds2.getWorkspace().getId() );
+        assertNotNull( ds2.getWorkspace() );
+        assertEquals( "foo", ds2.getWorkspace().getId() );
+        
+        Document dom = dom( in( out ) );
+        assertEquals( "dataStore", dom.getDocumentElement().getNodeName() );
+    }
+    
+    @Test
+    public void testDataStoreReferencedByName() throws Exception {
+        Catalog catalog = new CatalogImpl();
+        CatalogFactory cFactory = catalog.getFactory();
+        
+        WorkspaceInfo ws = cFactory.createWorkspace();
+        ws.setName( "foo" );
+        
+        DataStoreInfo ds1 = cFactory.createDataStore();
+        ds1.setName( "bar" );
+        ds1.setWorkspace( ws );
+        catalog.detach(ds1);
+        ((DataStoreInfoImpl)ds1).setId(null);
+        
+        ByteArrayOutputStream out = out();
+        XStreamPersister persister = new XStreamPersisterFactory().createXMLPersister();
+        persister.setReferenceByName(true);
+        
+        persister.save( ds1 , out );
+        
+        DataStoreInfo ds2 = persister.load( in( out ), DataStoreInfo.class );
+        assertEquals( "bar", ds2.getName() );
+        
+        assertNotNull( ds2.getWorkspace() );
+        assertEquals( "foo", ds2.getWorkspace().getId() );
         
         Document dom = dom( in( out ) );
         assertEquals( "dataStore", dom.getDocumentElement().getNodeName() );
@@ -329,9 +362,38 @@ public class XStreamPersisterTest {
         CoverageStoreInfo ds2 = persister.load( in( out ), CoverageStoreInfo.class );
         assertEquals( "bar", ds2.getName() );
         
-        //TODO: reenable when resolving proxy commited
-        //assertNotNull( ds2.getWorkspace() );
-        //assertEquals( "foo", ds2.getWorkspace().getId() );
+        assertNotNull( ds2.getWorkspace() );
+        assertEquals( "foo", ds2.getWorkspace().getId() );
+        
+        Document dom = dom( in( out ) );
+        assertEquals( "coverageStore", dom.getDocumentElement().getNodeName() );
+    }
+    
+    @Test
+    public void testCoverageStoreReferencedByName() throws Exception {
+        Catalog catalog = new CatalogImpl();
+        CatalogFactory cFactory = catalog.getFactory();
+        
+        WorkspaceInfo ws = cFactory.createWorkspace();
+        ws.setName( "foo" );
+        
+        CoverageStoreInfo cs1 = cFactory.createCoverageStore();
+        cs1.setName( "bar" );
+        cs1.setWorkspace( ws );
+        catalog.detach(cs1);
+        ((CoverageStoreInfoImpl)cs1).setId(null);
+        
+        ByteArrayOutputStream out = out();
+        XStreamPersister persister = new XStreamPersisterFactory().createXMLPersister();
+        persister.setReferenceByName(true);
+        
+        persister.save( cs1 , out );
+        
+        CoverageStoreInfo ds2 = persister.load( in( out ), CoverageStoreInfo.class );
+        assertEquals( "bar", ds2.getName() );
+        
+        assertNotNull( ds2.getWorkspace() );
+        assertEquals( "foo", ds2.getWorkspace().getId() );
         
         Document dom = dom( in( out ) );
         assertEquals( "coverageStore", dom.getDocumentElement().getNodeName() );
@@ -359,7 +421,40 @@ public class XStreamPersisterTest {
         assertEquals(WMSStoreInfoImpl.DEFAULT_CONNECT_TIMEOUT, wms2.getConnectTimeout());
         assertEquals(WMSStoreInfoImpl.DEFAULT_READ_TIMEOUT, wms2.getReadTimeout());
         
-        //TODO: reenable when resolving proxy commited
+        assertNotNull( wms2.getWorkspace() );
+        assertEquals( "foo", wms2.getWorkspace().getId() );
+        
+        Document dom = dom( in( out ) );
+        assertEquals( "wmsStore", dom.getDocumentElement().getNodeName() );
+    }
+    
+    @Test
+    public void testWMSStoreReferencedByName() throws Exception {
+        Catalog catalog = new CatalogImpl();
+        CatalogFactory cFactory = catalog.getFactory();
+        
+        WorkspaceInfo ws = cFactory.createWorkspace();
+        ws.setName( "foo" );
+        
+        WMSStoreInfo wms1 = cFactory.createWebMapServer();
+        wms1.setName( "bar" );
+        wms1.setWorkspace( ws );
+        wms1.setCapabilitiesURL( "http://fake.host/wms?request=GetCapabilities&service=wms");
+        catalog.detach(wms1);
+        ((WMSStoreInfoImpl)wms1).setId(null);
+        
+        ByteArrayOutputStream out = out();
+        XStreamPersister persister = new XStreamPersisterFactory().createXMLPersister();
+        persister.setReferenceByName(true);
+        
+        persister.save( wms1, out );
+        
+        WMSStoreInfo wms2 = persister.load( in( out ), WMSStoreInfo.class );
+        assertEquals( "bar", wms2.getName() );
+        assertEquals(WMSStoreInfoImpl.DEFAULT_MAX_CONNECTIONS, wms2.getMaxConnections());
+        assertEquals(WMSStoreInfoImpl.DEFAULT_CONNECT_TIMEOUT, wms2.getConnectTimeout());
+        assertEquals(WMSStoreInfoImpl.DEFAULT_READ_TIMEOUT, wms2.getReadTimeout());
+        
         assertNotNull( wms2.getWorkspace() );
         assertEquals( "foo", wms2.getWorkspace().getId() );
         
@@ -424,6 +519,7 @@ public class XStreamPersisterTest {
     }
     
     @Test
+    @Ignore // why do we want to xstream persist the catalog again?
     public void testCatalog() throws Exception {
         Catalog catalog = new CatalogImpl();
         CatalogFactory cFactory = catalog.getFactory();
@@ -677,6 +773,12 @@ public class XStreamPersisterTest {
     
     @Test
     public void testLayerGroupInfo() throws Exception {
+        for (LayerGroupInfo.Mode mode : LayerGroupInfo.Mode.values()) {
+            testSerializationWithMode(mode);
+        }
+    }
+
+    private void testSerializationWithMode(Mode mode) throws Exception {
         Catalog catalog = new CatalogImpl();
         CatalogFactory cFactory = catalog.getFactory();
         
@@ -684,7 +786,7 @@ public class XStreamPersisterTest {
         group1.setName("foo");
         group1.setTitle("foo title");
         group1.setAbstract("foo abstract");
-        group1.setMode(LayerGroupInfo.Mode.NAMED);
+        group1.setMode(mode);
 
         ByteArrayOutputStream out = out();
         persister.save(group1, out);
@@ -701,7 +803,7 @@ public class XStreamPersisterTest {
         
         Document dom = dom(in(out));
         assertEquals("layerGroup", dom.getDocumentElement().getNodeName());
-    }    
+    }
     
     @Test
     public void testLegacyLayerGroupWithoutMode() throws Exception {
@@ -864,12 +966,13 @@ public class XStreamPersisterTest {
 
     @Test
     public void testSRSConverter() throws Exception {
-        CoordinateReferenceSystem crs = CRS.decode("EPSG:4326");
+        CoordinateReferenceSystem crs = CRS.decode("EPSG:4901");
         SRSConverter c = new SRSConverter();
 
-        assertEquals("EPSG:4326", c.toString(crs));
-        assertFalse("EPSG:4326".equals( 
-            c.toString(CRS.parseWKT("GEOGCS[\"GCS_WGS_1984\",DATUM[\"WGS_1984\",SPHEROID[\"WGS_1984\",6378137,298.257223563]],PRIMEM[\"Greenwich\",0],UNIT[\"Degree\",0.017453292519943295]]"))));
+        assertEquals("EPSG:4901", c.toString(crs));
+        // definition with odd UOM that won't be matched to the EPSG one
+        assertFalse("EPSG:4901".equals( 
+            c.toString(CRS.parseWKT("GEOGCS[\"GCS_ATF_Paris\",DATUM[\"D_ATF\",SPHEROID[\"Plessis_1817\",6376523.0,308.64]],PRIMEM[\"Paris\",2.337229166666667],UNIT[\"Grad\",0.01570796326794897]]"))));
     }
 
     @Test

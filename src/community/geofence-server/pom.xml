@@ -7,23 +7,16 @@
     <parent>
         <groupId>org.geoserver</groupId>
         <artifactId>community</artifactId>
-        <version>2.10-SNAPSHOT</version>
+        <version>2.12-SNAPSHOT</version>
     </parent>
 
     <groupId>org.geoserver.community</groupId>
     <artifactId>gs-geofence-server</artifactId>
     <packaging>jar</packaging>
-    <version>2.10-SNAPSHOT</version>
+    <version>2.12-SNAPSHOT</version>
+
     <name>GeoFence Server</name>
     <description>GeoFence security internal server</description>
-
-    <repositories>
-        <repository>
-            <id>wicket-dnd</id>
-            <name>Wicket-dnd Repository</name>
-            <url>http://wicket-dnd.googlecode.com/svn/repo</url>
-        </repository>
-    </repositories>
 
     <dependencies>
          <dependency>
@@ -35,7 +28,7 @@
                             <groupId>javax.persistence</groupId>
                             <artifactId>persistence-api</artifactId>
                         </exclusion>
-                    </exclusions>                
+                    </exclusions>
          </dependency>
          <dependency>
                 <groupId>com.googlecode.genericdao</groupId>
@@ -69,7 +62,7 @@
         <dependency>
             <groupId>org.springframework</groupId>
             <artifactId>spring-web</artifactId>
-        </dependency>        
+        </dependency>
         <dependency>
             <groupId>org.springframework</groupId>
             <artifactId>spring-beans</artifactId>
@@ -82,17 +75,15 @@
             <groupId>org.springframework</groupId>
             <artifactId>spring-core</artifactId>
         </dependency>
-                
+
         <dependency>
             <groupId>org.geoserver</groupId>
             <artifactId>gs-main</artifactId>
-            <version>${project.version}</version>
         </dependency>
-        
+
         <dependency>
             <groupId>org.geoserver.web</groupId>
             <artifactId>gs-web-core</artifactId>
-            <version>${project.version}</version>
         </dependency>
 
         <dependency>
@@ -100,7 +91,7 @@
             <artifactId>geofence-services-impl</artifactId>
             <version>${gf.version}</version>
         </dependency>
-        
+
         <dependency>
           <groupId>org.geoserver.community</groupId>
           <artifactId>gs-geofence</artifactId>
@@ -112,18 +103,17 @@
             </exclusion>
           </exclusions>
         </dependency>
-        
+
         <dependency>
             <groupId>org.springframework</groupId>
             <artifactId>spring-oxm</artifactId>
-	    </dependency>
-      
-		<dependency>
-			<groupId>com.fasterxml.jackson.core</groupId>
-			<artifactId>jackson-databind</artifactId>
-			<version>2.5.3</version>
-		</dependency>
-                
+        </dependency>
+
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+        </dependency>
+
         <dependency>
             <groupId>xerces</groupId>
             <artifactId>xercesImpl</artifactId>
@@ -132,25 +122,16 @@
         <dependency>
             <groupId>com.github.svenmeier.wicket-dnd</groupId>
             <artifactId>wicket-dnd</artifactId>
-            <version>0.7.3</version>
-            <exclusions>
-              <!-- wicket-dnd depends on wicket 7.0 now, we use 7.1.0 -->
-              <exclusion>
-              	 <groupId>org.apache.wicket</groupId>
-              	 <artifactId>wicket-core</artifactId>
-              </exclusion>
-            </exclusions>
         </dependency>
 
         <!-- test dependencies -->
         <dependency>
             <groupId>org.geoserver</groupId>
             <artifactId>gs-main</artifactId>
-            <version>${project.version}</version>
             <classifier>tests</classifier>
             <scope>test</scope>
         </dependency>
-        
+
         <dependency>
             <groupId>org.geoserver.web</groupId>
             <artifactId>gs-web-core</artifactId>
@@ -158,15 +139,15 @@
             <classifier>tests</classifier>
             <scope>test</scope>
         </dependency>
-        
+
         <dependency>
             <groupId>org.geoserver.community</groupId>
             <artifactId>gs-geofence</artifactId>
             <version>${project.version}</version>
-            <classifier>tests</classifier> 
+            <classifier>tests</classifier>
             <scope>test</scope>
         </dependency>
-        
+
         <dependency>
             <groupId>org.springframework</groupId>
             <artifactId>spring-test</artifactId>
@@ -188,14 +169,14 @@
             <scope>test</scope>
         </dependency>
     </dependencies>
-  
+
       <build>
         <resources>
             <resource>
                 <directory>${basedir}/src/main/java</directory>
                 <includes>
                     <include>**/*.html</include>
-                </includes>            
+                </includes>
             </resource>
             <resource>
                 <directory>${basedir}/src/main/resources</directory>
@@ -203,7 +184,7 @@
                     <include>**/*</include>
                 </includes>
             </resource>
-        </resources>		
+        </resources>
     </build>
 </project>
 

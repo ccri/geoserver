@@ -95,13 +95,22 @@ public class GlobalSettingsPage extends ServerAdminPage {
         
         form.add( lockProviderChoice );
         
+        IModel<GeoServerInfo.WebUIMode> webUIModeModel = new PropertyModel<GeoServerInfo.WebUIMode>(globalInfoModel, "webUIMode");
+        if (webUIModeModel.getObject() == null) {
+            webUIModeModel.setObject(GeoServerInfo.WebUIMode.DEFAULT);
+        }
+        DropDownChoice<GeoServerInfo.WebUIMode> webUIModeChoice = new DropDownChoice<GeoServerInfo.WebUIMode>("webUIMode", 
+                webUIModeModel, Arrays.asList(GeoServerInfo.WebUIMode.values()));
+
+        form.add(webUIModeChoice);
+
         // Extension plugin for Global Settings
         // Loading of the settings from the Global Info
         IModel<SettingsInfo> settingsModel = new PropertyModel<SettingsInfo>(globalInfoModel, "settings");
         ListView extensions = SettingsPluginPanelInfo.createExtensions("extensions", settingsModel, getGeoServerApplication());
         form.add(extensions);
-        
-        Button submit = new Button("submit", new StringResourceModel("submit", this, null)) {
+
+        Button submit = new Button("submit") {
             @Override
             public void onSubmit() {
                 GeoServer gs = getGeoServer();
